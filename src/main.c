@@ -23,15 +23,15 @@
 // |        67/udp         |        open         |
 // +---------------------------------------------+
 
-// #define PRINT_HELP                                                                                                     \
-//     printf("+-------------------------------------------------------------------------+\n"                             \
-//            "|                          Usage: ./ipk-l4-scan                           |\n"                             \
-//            "+-------------------------------------------------------------------------+\n"                             \
-//            "| [-i interface | --interface interface]                                  |\n"                             \
-//            "| [--pu port-ranges | --pt port-ranges | -u port-ranges | -t port-ranges] |\n"                             \
-//            "| {-w timeout}                                                            |\n"                             \
-//            "| [domain-name | ip-address]                                              |\n"                             \
-//            "+-------------------------------------------------------------------------+\n")
+#define PRINT_HELP                                                                                                     \
+    printf("+-------------------------------------------------------------------------+\n"                             \
+           "|                          Usage: ./ipk-l4-scan                           |\n"                             \
+           "+-------------------------------------------------------------------------+\n"                             \
+           "| [-i interface | --interface interface]                                  |\n"                             \
+           "| [--pu port-ranges | --pt port-ranges | -u port-ranges | -t port-ranges] |\n"                             \
+           "| {-w timeout}                                                            |\n"                             \
+           "| [domain-name | ip-address]                                              |\n"                             \
+           "+-------------------------------------------------------------------------+\n")
 
 // https://stackoverflow.com/a/45796495
 void printNetworkInterfaces()
