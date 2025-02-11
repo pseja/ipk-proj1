@@ -1,5 +1,6 @@
 #include <getopt.h>
 #include <net/if.h>
+#include <regex.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -7,6 +8,7 @@
 
 #define RED "\e[0;31m"
 #define YEL "\e[0;33m"
+#define BLK "\e[0;30m"
 #define RES "\e[0m"
 
 // TODO: dynamic table library (with colors etc.)
@@ -152,16 +154,143 @@ Options parse_options(int argc, char **argv)
     return opts;
 }
 
-int main(int argc, char **argv)
+bool isValidPortNumber(int port_number)
 {
-    Options opts = parse_options(argc, argv);
+    return port_number >= 1 && port_number <= 65535;
+}
 
+int regmatch(const char *pattern, const char *input)
+{
+    regex_t regex;
+    int result = regcomp(&regex, pattern, REG_EXTENDED);
+    if (result)
+    {
+        fprintf(stderr, RED "[Error]" RES "Could not compile regex\n");
+        return 0;
+    }
+
+    result = regexec(&regex, input, 0, NULL, 0);
+    regfree(&regex);
+    return result == 0; // 0 -> found match
+}
+
+int isSingleNumber(const char *input, int *port)
+{
+    if (!regmatch("^[1-9][0-9]{0,4}$", input))
+    {
+        return 0;
+    }
+
+    *port = atoi(input);
+
+    return isValidPortNumber(*port);
+}
+
+int isCommaSeparatedList(const char *input, int *ports, int *count)
+{
+    if (!regmatch("^([1-9][0-9]{0,4})(,[1-9][0-9]{0,4})*$", input))
+    {
+        return 0;
+    }
+
+    char buffer[256];
+    strncpy(buffer, input, sizeof(buffer) - 1);
+    buffer[sizeof(buffer) - 1] = '\0';
+
+    char *token = strtok(buffer, ",");
+    int temp_ports[256], temp_count = 0;
+
+    while (token)
+    {
+        int port = atoi(token);
+        if (!isValidPortNumber(port))
+        {
+            return 0;
+        }
+        temp_ports[temp_count++] = port;
+        token = strtok(NULL, ",");
+    }
+
+    memcpy(ports, temp_ports, temp_count * sizeof(int));
+    *count = temp_count;
+
+    return 1;
+}
+
+int isValidRange(const char *input, int *start, int *end)
+{
+    if (!regmatch("^([1-9][0-9]{0,4})-([1-9][0-9]{0,4})$", input))
+    {
+        return 0;
+    }
+
+    char buffer[256];
+    strncpy(buffer, input, sizeof(buffer) - 1);
+    buffer[sizeof(buffer) - 1] = '\0';
+
+    char *dash = strchr(buffer, '-');
+
+    *start = atoi(buffer);
+    *end = atoi(dash + 1);
+
+    return isValidPortNumber(*start) && isValidPortNumber(*end) && (*start <= *end);
+}
+
+int test()
+{
+    const char *inputs[] = {"22", "22,23,24", "1-65535", "22,80-82", "22,", "22-65536", "0-5", "65535-1", NULL};
+
+    for (int i = 0; inputs[i] != NULL; i++)
+    {
+        const char *input = inputs[i];
+        printf("Input: \"%s\"\n", input);
+
+        int port, ports[256], count, start, end;
+
+        if (isSingleNumber(input, &port))
+        {
+            printf("Valid: Single number %d\n", port);
+        }
+        else if (isCommaSeparatedList(input, ports, &count))
+        {
+            printf("Valid: List of %d ports\n", count);
+            for (int i = 0; i < count; i++)
+            {
+                printf("    > %d\n", ports[i]);
+            }
+        }
+        else if (isValidRange(input, &start, &end))
+        {
+            printf("Valid: Range from %d to %d\n", start, end);
+        }
+        else
+        {
+            printf("Invalid\n");
+        }
+
+        printf("\n");
+    }
+
+    return 0;
+}
+
+// https://www.geeksforgeeks.org/creating-a-portscanner-in-c/
+// bitset for storing the ports, steal this from my ijc_proj1
+void portScanner(Options opts)
+{
     printf("Parsed arguments:\n");
     printf("    > Interface: %s\n", opts.interface ? opts.interface : "NULL");
     printf("    > UDP Ports: %s\n", opts.udp_ports ? opts.udp_ports : "NULL");
     printf("    > TCP Ports: %s\n", opts.tcp_ports ? opts.tcp_ports : "NULL");
     printf("    > Timeout: %d\n", opts.timeout);
     printf("    > Target: %s\n", opts.target ? opts.target : "NULL");
+}
 
-    return 0;
+int main(int argc, char **argv)
+{
+    Options opts = parse_options(argc, argv);
+
+    portScanner(opts);
+
+    return test();
 }
