@@ -8,7 +8,7 @@ BUILD_DIR=./build
 
 TARGET=ipk-l4-scan
 
-.PHONY: all run debug clean
+.PHONY: all run debug test clean
 
 $(TARGET): $(BUILD_DIR)/main.o
 	$(CC) $(CFLAGS) -o $@ $^ $(DFLAGS) $(LDFLAGS)
@@ -22,6 +22,9 @@ run: $(TARGET)
 
 debug: DFLAGS+=-DDEBUG -g
 debug: $(TARGET)
+
+test: $(TARGET)
+	@./test/argtest.sh
 
 clean:
 	rm -f $(TARGET) $(BUILD_DIR)/*.o
