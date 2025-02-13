@@ -1,7 +1,7 @@
 CC=gcc
-CFLAGS=-std=c11 -Wall -Wextra -Werror -g
-DFLAGS=
-LDFLAGS=
+CFLAGS=-std=c11 -Wall -Wextra -Werror
+DFLAGS=-g
+LDFLAGS=-lpcap
 
 SRC_DIR=./src
 BUILD_DIR=./build

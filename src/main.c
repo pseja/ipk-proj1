@@ -6,6 +6,22 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <stdint.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+typedef uint32_t u_int;
+typedef uint16_t u_short;
+typedef uint8_t u_char;
+#include <pcap.h>
+
+#include <arpa/inet.h>
+#include <errno.h>
+#include <netdb.h>
+#include <netinet/ip_icmp.h>
+#include <netinet/tcp.h>
+#include <netinet/udp.h>
+#include <unistd.h>
+
 #define RED "\e[0;31m"
 #define YEL "\e[0;33m"
 #define BLK "\e[0;30m"
@@ -35,28 +51,90 @@
            "| [domain-name | ip-address]                                              |\n"                             \
            "+-------------------------------------------------------------------------+\n")
 
-// https://stackoverflow.com/a/45796495
+pcap_if_t *getNetworkInterfaces()
+{
+    pcap_if_t *interfaces;
+    char error_buffer[PCAP_ERRBUF_SIZE];
+
+    if (pcap_findalldevs(&interfaces, error_buffer) == -1 || interfaces == NULL)
+    {
+        fprintf(stderr, RED "[Error] " RES "Finding interfaces failed.\n");
+        return NULL;
+    }
+
+    return interfaces;
+}
+
+bool isInterfaceValid(const char *name)
+{
+    pcap_if_t *interfaces = getNetworkInterfaces();
+    if (interfaces == NULL)
+    {
+        return false;
+    }
+
+    pcap_if_t *temp = interfaces;
+
+    while (temp != NULL)
+    {
+        if (strcmp(temp->name, name) == 0)
+        {
+            pcap_freealldevs(temp);
+
+            return true;
+        }
+
+        temp = temp->next;
+    }
+
+    pcap_freealldevs(interfaces);
+
+    return false;
+}
+
+void printExtraInterfaceInfo(const char *name)
+{
+    char ip[13];
+    bpf_u_int32 ip_raw;
+    char subnet_mask[13];
+    bpf_u_int32 subnet_mask_raw;
+    char error_buffer[PCAP_ERRBUF_SIZE];
+    struct in_addr address;
+
+    if (pcap_lookupnet(name, &ip_raw, &subnet_mask_raw, error_buffer) == -1)
+    {
+        return; // no additional interface info, dont print anything
+    }
+
+    address.s_addr = ip_raw;
+    strcpy(ip, inet_ntoa(address));
+
+    address.s_addr = subnet_mask_raw;
+    strcpy(subnet_mask, inet_ntoa(address));
+
+    printf("        > ip: %s\n", ip);
+    printf("        > mask: %s\n", subnet_mask);
+}
+
 void printNetworkInterfaces()
 {
-    struct if_nameindex *if_nidxs, *intf;
-
-    if_nidxs = if_nameindex();
-    if (if_nidxs == NULL)
+    pcap_if_t *interfaces = getNetworkInterfaces();
+    if (interfaces == NULL)
     {
-        fprintf(stderr, RED "[Error] " RES "Couldn't find any network interfaces!\n");
-        return;
+        exit(EXIT_FAILURE);
     }
 
     printf("Network interfaces:\n");
 
-    intf = if_nidxs;
-    while (intf->if_index != 0 || intf->if_name != NULL)
+    pcap_if_t *temp = interfaces;
+    while (temp != NULL)
     {
-        printf("    > %d: %s\n", intf->if_index, intf->if_name);
-        intf++;
+        printf("    > %s - %s\n", temp->name, temp->description);
+        printExtraInterfaceInfo(temp->name);
+        temp = temp->next;
     }
 
-    if_freenameindex(if_nidxs);
+    pcap_freealldevs(interfaces);
 }
 
 typedef struct Options
@@ -91,6 +169,12 @@ Options parse_options(int argc, char **argv)
         switch (opt)
         {
         case 'i':
+            if (opts.interface != NULL)
+            {
+                fprintf(stderr, RED "[Error] " RES "Interface is already specified.\n");
+                exit(EXIT_FAILURE);
+            }
+
             if (optarg)
             {
                 opts.interface = optarg;
@@ -103,6 +187,13 @@ Options parse_options(int argc, char **argv)
             {
                 printNetworkInterfaces();
                 exit(EXIT_SUCCESS);
+            }
+
+            if (!isInterfaceValid(opts.interface))
+            {
+
+                fprintf(stderr, RED "[Error] " RES "Interface is not valid\n");
+                exit(EXIT_FAILURE);
             }
             break;
         case 'u':
@@ -245,7 +336,7 @@ int test()
         const char *input = inputs[i];
         printf("Input: \"%s\"\n", input);
 
-        int port, ports[256], count, start, end;
+        int port, ports[65536], count, start, end;
 
         if (isSingleNumber(input, &port))
         {
