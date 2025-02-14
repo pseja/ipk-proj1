@@ -20,7 +20,7 @@ RED="\033[0;31m"
 NORMAL="\033[0m"
 
 # change this based on your valid interface
-VALID_INTERFACE="eth0"
+VALID_INTERFACE="wlo1"
 
 IPK_L4_SCAN="./ipk-l4-scan"
 test_count=0
@@ -82,7 +82,10 @@ run_test "Invalid timeout - no value" "-i ${VALID_INTERFACE} -w -u 80,443 www.fi
 run_test "Invalid flag" "-i ${VALID_INTERFACE} --invalidflag -u 80,443 www.vut.cz" 1
 run_test "Invalid long flag" "-i ${VALID_INTERFACE} -x -u 80,443 www.vut.cz" 1
 
-## TODO arguments with different sequence
+run_test "Different argument sequence 1" "-u 53,67 -i ${VALID_INTERFACE} 127.0.0.1" 0
+run_test "Different argument sequence 2" "127.0.0.1 -i ${VALID_INTERFACE} -u 53,67" 0
+run_test "Different argument sequence 3" "-t 80,443,8080 -i ${VALID_INTERFACE} www.vutbr.cz" 0
+run_test "Different argument sequence 4" "www.vutbr.cz -i ${VALID_INTERFACE} -t 80,443,8080" 0
 
 ## advanced tests
 ### IPv4
