@@ -350,6 +350,18 @@ Options parse_options(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
 
+    if (opts.interface == NULL)
+    {
+        fprintf(stderr, RED "[Error] " RES "Exactly one interface has to be specified.\n");
+        exit(EXIT_FAILURE);
+    }
+
+    if (opts.tcp_ports == NULL && opts.udp_ports == NULL)
+    {
+        fprintf(stderr, RED "[Error] " RES "TCP or UDP port range has to be specified.\n");
+        exit(EXIT_FAILURE);
+    }
+
     return opts;
 }
 
