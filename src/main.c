@@ -410,7 +410,7 @@ Options parse_options(int argc, char **argv)
     return opts;
 }
 
-char *getTargetHostname(Options opts)
+void getTargetHostname(Options opts, char *hostname)
 {
     int status;
     struct addrinfo hints, *res, *p;
@@ -444,19 +444,11 @@ char *getTargetHostname(Options opts)
         inet_ntop(p->ai_family, addr, ipstr, sizeof(ipstr));
         freeaddrinfo(res);
 
-        char *ipstr_copy = malloc(strlen(ipstr) + 1);
-        if (ipstr_copy == NULL)
-        {
-            fprintf(stderr, RED "[Error] " RES "Memory allocation failed\n");
-            exit(EXIT_FAILURE);
-        }
-
-        strcpy(ipstr_copy, ipstr);
-        return ipstr_copy;
+        strcpy(hostname, ipstr);
+        return;
     }
 
     freeaddrinfo(res);
-    return NULL;
 }
 
 // https://www.geeksforgeeks.org/creating-a-portscanner-in-c/
@@ -470,15 +462,13 @@ void portScanner(Options opts)
     printf("    > Timeout: %d\n", opts.timeout);
     printf("    > Target: %s\n", opts.target ? opts.target : "NULL");
 
+    char *hostname = opts.target;
     if (opts.target_type != TARGET_IPV4)
     {
-        char *hostname = getTargetHostname(opts);
-        printf("%s\n", hostname);
-        if (hostname != NULL)
-        {
-            free(hostname);
-        }
+        getTargetHostname(opts, hostname);
     }
+
+    printf("%s\n", hostname);
 }
 
 int main(int argc, char **argv)
