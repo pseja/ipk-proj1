@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include <getopt.h>
 #include <net/if.h>
 #include <regex.h>
@@ -13,6 +14,10 @@ typedef uint32_t u_int;
 typedef uint16_t u_short;
 typedef uint8_t u_char;
 #include <pcap.h>
+
+#include <netdb.h>
+#include <netinet/ip.h>
+#include <netinet/tcp.h>
 
 #define RED "\e[0;31m"
 #define YEL "\e[0;33m"
@@ -214,20 +219,38 @@ int isValidRange(const char *input, int *start, int *end)
 // source: https://stackoverflow.com/a/17773849
 bool isValidUrl(const char *url)
 {
-    return regmatch("^(https?://[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}|www\\.[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,})$", url) || strcmp("localhost", url) == 0;
+    return regmatch("^(https?://[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}|www\\.[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,})$", url) ||
+           strcmp("localhost", url) == 0;
 }
 
 // source: https://stackoverflow.com/a/36760050
 bool isValidIpv4(const char *ipv4)
 {
-    return regmatch("^((25[0-5]|(2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9]))\\.){3}(25[0-5]|(2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9]))$", ipv4);
+    return regmatch(
+        "^((25[0-5]|(2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9]))\\.){3}(25[0-5]|(2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9]))$",
+        ipv4);
 }
 
 // source: https://stackoverflow.com/a/17871737
 bool isValidIpv6(const char *ipv6)
 {
-    return regmatch("^(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))$", ipv6);
+    return regmatch("^(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-"
+                    "9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-"
+                    "F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-"
+                    "F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-"
+                    "9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,"
+                    "1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-"
+                    "4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))$",
+                    ipv6);
 }
+
+typedef enum
+{
+    TARGET_URL,
+    TARGET_IPV4,
+    TARGET_IPV6,
+    TARGET_UNKNOWN,
+} TargetType;
 
 typedef struct Options
 {
@@ -236,7 +259,26 @@ typedef struct Options
     char *tcp_ports;
     int timeout;
     char *target;
+    TargetType target_type;
 } Options;
+
+TargetType determineTargetType(Options opts)
+{
+    if (isValidUrl(opts.target))
+    {
+        return TARGET_URL;
+    }
+    else if (isValidIpv4(opts.target))
+    {
+        return TARGET_IPV4;
+    }
+    else if (isValidIpv6(opts.target))
+    {
+        return TARGET_IPV6;
+    }
+
+    return TARGET_UNKNOWN;
+}
 
 Options parse_options(int argc, char **argv)
 {
@@ -294,8 +336,9 @@ Options parse_options(int argc, char **argv)
                 exit(EXIT_FAILURE);
             }
 
-            int uport, uports[65535], ucount, ustart, uend; // TODO use bitset for this 
-            if (!isSingleNumber(optarg, &uport) && !isCommaSeparatedList(optarg, uports, &ucount) && !isValidRange(optarg, &ustart, &uend))            
+            int uport, uports[65535], ucount, ustart, uend; // TODO use bitset for this
+            if (!isSingleNumber(optarg, &uport) && !isCommaSeparatedList(optarg, uports, &ucount) &&
+                !isValidRange(optarg, &ustart, &uend))
             {
                 fprintf(stderr, RED "[Error] " RES "Invalid UDP port range\n");
                 exit(EXIT_FAILURE);
@@ -310,8 +353,9 @@ Options parse_options(int argc, char **argv)
                 exit(EXIT_FAILURE);
             }
 
-            int tport, tports[65535], tcount, tstart, tend; // TODO use bitset for this 
-            if (!isSingleNumber(optarg, &tport) && !isCommaSeparatedList(optarg, tports, &tcount) && !isValidRange(optarg, &tstart, &tend))            
+            int tport, tports[65535], tcount, tstart, tend; // TODO use bitset for this
+            if (!isSingleNumber(optarg, &tport) && !isCommaSeparatedList(optarg, tports, &tcount) &&
+                !isValidRange(optarg, &tstart, &tend))
             {
                 fprintf(stderr, RED "[Error] " RES "Invalid TCP port range\n");
                 exit(EXIT_FAILURE);
@@ -344,7 +388,8 @@ Options parse_options(int argc, char **argv)
     }
 
     opts.target = argv[optind];
-    if (!isValidUrl(opts.target) && !isValidIpv4(opts.target) && !isValidIpv6(opts.target))
+    opts.target_type = determineTargetType(opts);
+    if (opts.target_type == TARGET_UNKNOWN)
     {
         fprintf(stderr, RED "[Error] " RES "%s is not a valid target address.\n", opts.target);
         exit(EXIT_FAILURE);
