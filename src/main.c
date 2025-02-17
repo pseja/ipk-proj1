@@ -18,6 +18,9 @@ typedef uint8_t u_char;
 #include <netdb.h>
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
+#include <unistd.h>
+
+#include <ifaddrs.h>
 
 #define RED "\e[0;31m"
 #define YEL "\e[0;33m"
@@ -89,28 +92,44 @@ bool isInterfaceValid(const char *name)
     return false;
 }
 
-void printExtraInterfaceInfo(const char *name)
+void printExtraInterfaceInfo(const char *name, char *return_ip)
 {
-    char ip[13];
-    bpf_u_int32 ip_raw;
-    char subnet_mask[13];
-    bpf_u_int32 subnet_mask_raw;
-    char error_buffer[PCAP_ERRBUF_SIZE];
-    struct in_addr address;
+    struct ifaddrs *ifaddr, *ifa;
+    char ip[INET_ADDRSTRLEN];
+    char subnet_mask[INET_ADDRSTRLEN];
 
-    if (pcap_lookupnet(name, &ip_raw, &subnet_mask_raw, error_buffer) == -1)
+    if (getifaddrs(&ifaddr) == -1)
     {
-        return; // no additional interface info, dont print anything
+        perror("getifaddrs");
+        return;
     }
 
-    address.s_addr = ip_raw;
-    strcpy(ip, inet_ntoa(address));
+    for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next)
+    {
+        if (ifa->ifa_addr == NULL)
+            continue;
 
-    address.s_addr = subnet_mask_raw;
-    strcpy(subnet_mask, inet_ntoa(address));
+        if (strcmp(ifa->ifa_name, name) == 0 && ifa->ifa_addr->sa_family == AF_INET)
+        {
+            struct sockaddr_in *addr = (struct sockaddr_in *)ifa->ifa_addr;
+            struct sockaddr_in *netmask = (struct sockaddr_in *)ifa->ifa_netmask;
 
-    printf("        > ip: %s\n", ip);
-    printf("        > mask: %s\n", subnet_mask);
+            inet_ntop(AF_INET, &addr->sin_addr, ip, INET_ADDRSTRLEN);
+            inet_ntop(AF_INET, &netmask->sin_addr, subnet_mask, INET_ADDRSTRLEN);
+
+            printf("        > ip: %s\n", ip);
+            printf("        > mask: %s\n", subnet_mask);
+
+            if (return_ip != NULL)
+            {
+                strcpy(return_ip, ip);
+            }
+
+            break;
+        }
+    }
+
+    freeifaddrs(ifaddr);
 }
 
 void printNetworkInterfaces()
@@ -127,7 +146,7 @@ void printNetworkInterfaces()
     while (temp != NULL)
     {
         printf("    > %s - %s\n", temp->name, temp->description);
-        printExtraInterfaceInfo(temp->name);
+        printExtraInterfaceInfo(temp->name, NULL);
         temp = temp->next;
     }
 
@@ -469,6 +488,23 @@ void portScanner(Options opts)
     }
 
     printf("%s\n", hostname);
+
+    // struct in_addr server_ip;
+    // server_ip.s_addr = inet_addr(hostname);
+
+    int raw_socket = socket(AF_INET, SOCK_RAW, IPPROTO_RAW);
+    if (raw_socket < 0)
+    {
+        fprintf(stderr, RED "[Error] " RES "Creating a socket failed, try running with sudo.\n");
+        exit(EXIT_FAILURE);
+    }
+
+    // char datagram[4096];
+    // struct iphdr *ip_header = (struct iphdr *)datagram;
+    // struct tcphdr *tcp_header = (struct tcphdr *)(datagram + sizeof(struct ip));
+
+    char ip_addr[1024]; // Local IP address
+    printExtraInterfaceInfo(opts.interface, ip_addr);
 }
 
 int main(int argc, char **argv)
