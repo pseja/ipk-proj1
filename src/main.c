@@ -117,12 +117,15 @@ void printExtraInterfaceInfo(const char *name, char *return_ip)
             inet_ntop(AF_INET, &addr->sin_addr, ip, INET_ADDRSTRLEN);
             inet_ntop(AF_INET, &netmask->sin_addr, subnet_mask, INET_ADDRSTRLEN);
 
-            printf("        > ip: %s\n", ip);
-            printf("        > mask: %s\n", subnet_mask);
-
+            // assign or print - this is very eww TODO: fix this
             if (return_ip != NULL)
             {
                 strcpy(return_ip, ip);
+            }
+            else
+            {
+                printf("        > ip: %s\n", ip);
+                printf("        > mask: %s\n", subnet_mask);
             }
 
             break;
@@ -470,6 +473,33 @@ void getTargetHostname(Options opts, char *hostname)
     freeaddrinfo(res);
 }
 
+unsigned short checkSum(unsigned short *datagram, int packet_size)
+{
+    register long sum;
+    unsigned short odd_byte;
+    register short result;
+
+    sum = 0;
+    while (packet_size > 1)
+    {
+        sum += *datagram++;
+        packet_size -= 2;
+    }
+
+    if (packet_size == 1)
+    {
+        odd_byte = 0;
+        *((u_char *)&odd_byte) = *(u_char *)datagram;
+        sum += odd_byte;
+    }
+
+    sum = (sum >> 16) + (sum & 0xffff);
+    sum = sum + (sum >> 16);
+    result = (short)~sum;
+
+    return result;
+}
+
 // https://www.geeksforgeeks.org/creating-a-portscanner-in-c/
 // bitset for storing the ports, steal this from my ijc_proj1
 void portScanner(Options opts)
@@ -489,8 +519,8 @@ void portScanner(Options opts)
 
     printf("%s\n", hostname);
 
-    // struct in_addr server_ip;
-    // server_ip.s_addr = inet_addr(hostname);
+    struct in_addr server_ip;
+    server_ip.s_addr = inet_addr(hostname);
 
     int raw_socket = socket(AF_INET, SOCK_RAW, IPPROTO_RAW);
     if (raw_socket < 0)
@@ -499,12 +529,46 @@ void portScanner(Options opts)
         exit(EXIT_FAILURE);
     }
 
-    // char datagram[4096];
-    // struct iphdr *ip_header = (struct iphdr *)datagram;
-    // struct tcphdr *tcp_header = (struct tcphdr *)(datagram + sizeof(struct ip));
+    char ip_addr[1024];                               // Local IP address
+    printExtraInterfaceInfo(opts.interface, ip_addr); // TODO make some better specific function to return interface ip
 
-    char ip_addr[1024]; // Local IP address
-    printExtraInterfaceInfo(opts.interface, ip_addr);
+    char datagram[4096];
+    struct iphdr *ip_header = (struct iphdr *)datagram;
+    struct tcphdr *tcp_header = (struct tcphdr *)(datagram + sizeof(struct ip));
+
+    memset(datagram, 0, 4096);
+
+    // ip header based on RFC 791
+    ip_header->version = 4; // ipv4
+    ip_header->ihl = 5;     // 20 byte header
+    ip_header->tos = 0;
+    ip_header->tot_len = sizeof(struct ip) + sizeof(struct tcphdr);
+    ip_header->id = htons(42069);       // hehe, maybe later random number generator?
+    ip_header->frag_off = htons(16384); // don't fragment
+    ip_header->ttl = 255;               // maximum ttl because why not
+    ip_header->protocol = IPPROTO_TCP;
+    ip_header->check = 0; // initially has to be 0
+    ip_header->saddr = inet_addr(ip_addr);
+    ip_header->daddr = server_ip.s_addr; // destination ip
+    ip_header->check = checkSum((unsigned short *)datagram, ip_header->tot_len);
+
+    // tcp header based on RFC 793
+    tcp_header->source = htons(42069);
+    tcp_header->dest = htons(80);
+    tcp_header->seq = htonl(123456789); // idk what to put here
+    tcp_header->ack_seq = 0;
+    tcp_header->doff = sizeof(struct tcphdr) / 4;
+    tcp_header->urg = 0;
+    tcp_header->ack = 0;
+    tcp_header->psh = 0;
+    tcp_header->rst = 0;
+    tcp_header->syn = 1;
+    tcp_header->fin = 0;
+    tcp_header->window = htons(14600);
+    tcp_header->check = 0;
+    tcp_header->urg_ptr = 0;
+
+    printf("sending now...\n");
 }
 
 int main(int argc, char **argv)
