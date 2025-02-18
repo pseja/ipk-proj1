@@ -500,6 +500,20 @@ unsigned short checkSum(unsigned short *datagram, int packet_size)
     return result;
 }
 
+struct pseudo_header
+{
+    u_int32_t source_address;
+    u_int32_t dest_address;
+    u_int8_t placeholder;
+    u_int8_t protocol;
+    u_int16_t tcp_length;
+    struct tcphdr tcp;
+};
+
+struct target_header
+{
+};
+
 // https://www.geeksforgeeks.org/creating-a-portscanner-in-c/
 // bitset for storing the ports, steal this from my ijc_proj1
 void portScanner(Options opts)
@@ -569,6 +583,43 @@ void portScanner(Options opts)
     tcp_header->urg_ptr = 0;
 
     printf("sending now...\n");
+
+    struct sockaddr_in destination_ip;
+    destination_ip.sin_family = AF_INET;
+    destination_ip.sin_port = opts.tcp_ports[0];
+    destination_ip.sin_addr.s_addr = server_ip.s_addr;
+
+    printf("1\n");
+
+    struct pseudo_header psh;
+
+    tcp_header->dest = htons(opts.tcp_ports[0]); // set the dest to the actual target_port
+    tcp_header->check = 0;
+
+    printf("2\n");
+
+    psh.source_address = inet_addr(ip_addr);
+    psh.dest_address = destination_ip.sin_addr.s_addr;
+    psh.placeholder = 0;
+    psh.protocol = IPPROTO_TCP;
+    psh.tcp_length = htons(sizeof(struct tcphdr));
+
+    printf("3\n");
+
+    // copy tcp header into pseudo header
+    memcpy(&psh.tcp, tcp_header, sizeof(struct tcphdr));
+    tcp_header->check = checkSum((unsigned short *)&psh, sizeof(struct pseudo_header));
+
+    printf("4\n");
+
+    if (sendto(raw_socket, datagram, sizeof(struct iphdr) + sizeof(struct tcphdr), 0,
+               (struct sockaddr *)&destination_ip, sizeof(destination_ip)) < 0)
+    {
+        fprintf(stderr, RED "[Error] " RES "Sending SYN packet failed.\n");
+        exit(EXIT_FAILURE);
+    }
+
+    printf("successfully sent\n");
 
     close(raw_socket);
 }
