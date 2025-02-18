@@ -569,6 +569,8 @@ void portScanner(Options opts)
     tcp_header->urg_ptr = 0;
 
     printf("sending now...\n");
+
+    close(raw_socket);
 }
 
 int main(int argc, char **argv)
