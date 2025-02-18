@@ -277,8 +277,8 @@ typedef enum
 typedef struct Options
 {
     char *interface;
-    char *udp_ports;
-    char *tcp_ports;
+    int *udp_ports;
+    int *tcp_ports;
     int timeout;
     char *target;
     TargetType target_type;
@@ -366,7 +366,7 @@ Options parse_options(int argc, char **argv)
                 exit(EXIT_FAILURE);
             }
 
-            opts.udp_ports = optarg;
+            opts.udp_ports = uports;
             break;
         case 't':
             if (opts.tcp_ports != NULL)
@@ -383,7 +383,7 @@ Options parse_options(int argc, char **argv)
                 exit(EXIT_FAILURE);
             }
 
-            opts.tcp_ports = optarg;
+            opts.tcp_ports = tports;
             break;
         case 'w': {
             if (!regmatch("^[1-9][0-9]*$", optarg))
@@ -451,23 +451,28 @@ void getTargetHostname(Options opts, char *hostname)
     for (p = res; p != NULL; p = p->ai_next)
     {
         void *addr;
+        char *ip_version;
 
         if (p->ai_family == AF_INET)
         {
             struct sockaddr_in *ipv4 = (struct sockaddr_in *)p->ai_addr;
             addr = &(ipv4->sin_addr);
+            ip_version = "ipv4";
         }
         else
         {
             struct sockaddr_in6 *ipv6 = (struct sockaddr_in6 *)p->ai_addr;
             addr = &(ipv6->sin6_addr);
+            ip_version = "ipv6";
         }
 
-        inet_ntop(p->ai_family, addr, ipstr, sizeof(ipstr));
-        freeaddrinfo(res);
-
-        strcpy(hostname, ipstr);
-        return;
+        if (strcmp(ip_version, "ipv4") == 0)
+        {
+            inet_ntop(p->ai_family, addr, ipstr, sizeof(ipstr));
+            freeaddrinfo(res);
+            strcpy(hostname, ipstr);
+            return;
+        }
     }
 
     freeaddrinfo(res);
@@ -510,20 +515,16 @@ struct pseudo_header
     struct tcphdr tcp;
 };
 
-struct target_header
-{
-};
-
 // https://www.geeksforgeeks.org/creating-a-portscanner-in-c/
 // bitset for storing the ports, steal this from my ijc_proj1
 void portScanner(Options opts)
 {
-    printf("Parsed arguments:\n");
-    printf("    > Interface: %s\n", opts.interface ? opts.interface : "NULL");
-    printf("    > UDP Ports: %s\n", opts.udp_ports ? opts.udp_ports : "NULL");
-    printf("    > TCP Ports: %s\n", opts.tcp_ports ? opts.tcp_ports : "NULL");
-    printf("    > Timeout: %d\n", opts.timeout);
-    printf("    > Target: %s\n", opts.target ? opts.target : "NULL");
+    // printf("Parsed arguments:\n");
+    // printf("    > Interface: %s\n", opts.interface ? opts.interface : "NULL");
+    // printf("    > UDP Ports: %s\n", opts.udp_ports ? opts.udp_ports : "NULL");
+    // printf("    > TCP Ports: %s\n", opts.tcp_ports ? opts.tcp_ports : "NULL");
+    // printf("    > Timeout: %d\n", opts.timeout);
+    // printf("    > Target: %s\n", opts.target ? opts.target : "NULL");
 
     char *hostname = opts.target;
     if (opts.target_type != TARGET_IPV4)
@@ -568,7 +569,7 @@ void portScanner(Options opts)
 
     // tcp header based on RFC 793
     tcp_header->source = htons(42069);
-    tcp_header->dest = htons(80);
+    tcp_header->dest = htons(opts.tcp_ports[0]); // set the dest to the actual target_port
     tcp_header->seq = htonl(123456789); // idk what to put here
     tcp_header->ack_seq = 0;
     tcp_header->doff = sizeof(struct tcphdr) / 4;
@@ -582,35 +583,23 @@ void portScanner(Options opts)
     tcp_header->check = 0;
     tcp_header->urg_ptr = 0;
 
-    printf("sending now...\n");
+    printf("sending now to %d...\n", opts.tcp_ports[0]);
 
     struct sockaddr_in destination_ip;
     destination_ip.sin_family = AF_INET;
-    destination_ip.sin_port = opts.tcp_ports[0];
+    destination_ip.sin_port = htons(opts.tcp_ports[0]); // set the dest to the actual target_port
     destination_ip.sin_addr.s_addr = server_ip.s_addr;
 
-    printf("1\n");
-
     struct pseudo_header psh;
-
-    tcp_header->dest = htons(opts.tcp_ports[0]); // set the dest to the actual target_port
-    tcp_header->check = 0;
-
-    printf("2\n");
-
     psh.source_address = inet_addr(ip_addr);
     psh.dest_address = destination_ip.sin_addr.s_addr;
     psh.placeholder = 0;
     psh.protocol = IPPROTO_TCP;
     psh.tcp_length = htons(sizeof(struct tcphdr));
 
-    printf("3\n");
-
     // copy tcp header into pseudo header
     memcpy(&psh.tcp, tcp_header, sizeof(struct tcphdr));
     tcp_header->check = checkSum((unsigned short *)&psh, sizeof(struct pseudo_header));
-
-    printf("4\n");
 
     if (sendto(raw_socket, datagram, sizeof(struct iphdr) + sizeof(struct tcphdr), 0,
                (struct sockaddr *)&destination_ip, sizeof(destination_ip)) < 0)
@@ -621,6 +610,46 @@ void portScanner(Options opts)
 
     printf("successfully sent\n");
 
+    int response_socket = socket(AF_INET, SOCK_RAW, IPPROTO_TCP);
+    if (response_socket < 0)
+    {
+        fprintf(stderr, RED "[Error] " RES "Creating a socket failed, try running with sudo.\n");
+        exit(EXIT_FAILURE);
+    }
+
+    struct sockaddr saddr;
+    int saddr_size = sizeof(saddr);
+    unsigned char *buffer = (unsigned char *)malloc(65536);
+    int data_size = recvfrom(response_socket, buffer, 65536, 0, (struct sockaddr *)&saddr, (socklen_t *)&saddr_size);
+    if (data_size < 0)
+    {
+        fprintf(stderr, RED "[Error] " RES "Unable to receive packets.\n");
+        exit(EXIT_FAILURE);
+    }
+
+    struct iphdr *ip_head = (struct iphdr *)buffer;
+    struct sockaddr_in source;
+    unsigned short ip_head_len = ip_head->ihl * 4;
+    struct tcphdr *tcp_head = (struct tcphdr *)(buffer + ip_head_len);
+    memset(&source, 0, sizeof(source));
+    source.sin_addr.s_addr = ip_head->saddr;
+
+    if (ip_head->protocol == IPPROTO_TCP)
+    {
+        // doesnt work for now, idk why, in wireshark it looks correct
+        // sending SYN -> receiving SYN, ACK -> then sending RST to the port, but program prints CLOSED
+        if (tcp_head->syn == 1 && tcp_head->ack == 1)
+        {
+            printf("%d: OPEN\n", opts.tcp_ports[0]);
+        }
+        else
+        {
+            printf("%d: CLOSED\n", opts.tcp_ports[0]);
+        }
+    }
+
+    free(buffer);
+    close(response_socket);
     close(raw_socket);
 }
 
