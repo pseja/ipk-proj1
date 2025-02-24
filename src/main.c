@@ -18,38 +18,16 @@ typedef uint8_t u_char;
 #include <netdb.h>
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
+#include <netinet/udp.h>
 #include <unistd.h>
 
 #include <ifaddrs.h>
+#include <signal.h>
 
 #define RED "\e[0;31m"
 #define YEL "\e[0;33m"
 #define BLK "\e[0;30m"
 #define RES "\e[0m"
-
-// TODO: dynamic table library (with colors etc.)
-
-// +---------------------------------------------+
-// | interesting ports on localhost (127.0.0.1): |
-// +---------------------------------------------+
-// |         PORT          |        STATE        |
-// +---------------------------------------------+
-// |        21/tcp         |       closed        |
-// |        22/tcp         |        open         |
-// |       143/tcp         |       filtered      |
-// |        53/udp         |       closed        |
-// |        67/udp         |        open         |
-// +---------------------------------------------+
-
-#define PRINT_HELP                                                                                                     \
-    printf("+-------------------------------------------------------------------------+\n"                             \
-           "|                          Usage: ./ipk-l4-scan                           |\n"                             \
-           "+-------------------------------------------------------------------------+\n"                             \
-           "| [-i interface | --interface interface]                                  |\n"                             \
-           "| [--pu port-ranges | --pt port-ranges | -u port-ranges | -t port-ranges] |\n"                             \
-           "| {-w timeout}                                                            |\n"                             \
-           "| [domain-name | ip-address]                                              |\n"                             \
-           "+-------------------------------------------------------------------------+\n")
 
 pcap_if_t *getNetworkInterfaces()
 {
@@ -79,7 +57,7 @@ bool isInterfaceValid(const char *name)
     {
         if (strcmp(temp->name, name) == 0)
         {
-            pcap_freealldevs(temp);
+            pcap_freealldevs(interfaces);
 
             return true;
         }
@@ -241,8 +219,11 @@ int isValidRange(const char *input, int *start, int *end)
 // source: https://stackoverflow.com/a/17773849
 bool isValidUrl(const char *url)
 {
-    return regmatch("^(https?://[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}|www\\.[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,})$", url) ||
-           strcmp("localhost", url) == 0;
+    (void)url;
+    return 1; // TODO fix url regex, because scanme.nmap.org is valid but the regex doesn't take it as valid, returning
+              // true for everything for now
+    // return regmatch("^(https?://[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}|www\\.[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,})$", url) ||
+    // strcmp("localhost", url) == 0;
 }
 
 // source: https://stackoverflow.com/a/36760050
@@ -451,28 +432,23 @@ void getTargetHostname(Options opts, char *hostname)
     for (p = res; p != NULL; p = p->ai_next)
     {
         void *addr;
-        char *ip_version;
 
         if (p->ai_family == AF_INET)
         {
             struct sockaddr_in *ipv4 = (struct sockaddr_in *)p->ai_addr;
             addr = &(ipv4->sin_addr);
-            ip_version = "ipv4";
+            opts.target_type = TARGET_IPV4;
         }
         else
         {
             struct sockaddr_in6 *ipv6 = (struct sockaddr_in6 *)p->ai_addr;
             addr = &(ipv6->sin6_addr);
-            ip_version = "ipv6";
+            opts.target_type = TARGET_IPV6;
         }
 
-        if (strcmp(ip_version, "ipv4") == 0)
-        {
-            inet_ntop(p->ai_family, addr, ipstr, sizeof(ipstr));
-            freeaddrinfo(res);
-            strcpy(hostname, ipstr);
-            return;
-        }
+        inet_ntop(p->ai_family, addr, ipstr, sizeof(ipstr));
+        strcpy(hostname, ipstr);
+        break;
     }
 
     freeaddrinfo(res);
@@ -519,20 +495,11 @@ struct pseudo_header
 // bitset for storing the ports, steal this from my ijc_proj1
 void portScanner(Options opts)
 {
-    // printf("Parsed arguments:\n");
-    // printf("    > Interface: %s\n", opts.interface ? opts.interface : "NULL");
-    // printf("    > UDP Ports: %s\n", opts.udp_ports ? opts.udp_ports : "NULL");
-    // printf("    > TCP Ports: %s\n", opts.tcp_ports ? opts.tcp_ports : "NULL");
-    // printf("    > Timeout: %d\n", opts.timeout);
-    // printf("    > Target: %s\n", opts.target ? opts.target : "NULL");
-
     char *hostname = opts.target;
     if (opts.target_type != TARGET_IPV4)
     {
         getTargetHostname(opts, hostname);
     }
-
-    printf("%s\n", hostname);
 
     struct in_addr server_ip;
     server_ip.s_addr = inet_addr(hostname);
@@ -553,6 +520,8 @@ void portScanner(Options opts)
 
     memset(datagram, 0, 4096);
 
+    static int sequence_number = 69;
+
     // ip header based on RFC 791
     ip_header->version = 4; // ipv4
     ip_header->ihl = 5;     // 20 byte header
@@ -570,7 +539,9 @@ void portScanner(Options opts)
     // tcp header based on RFC 793
     tcp_header->source = htons(42069);
     tcp_header->dest = htons(opts.tcp_ports[0]); // set the dest to the actual target_port
-    tcp_header->seq = htonl(123456789); // idk what to put here
+    tcp_header->seq =
+        htonl(sequence_number++); // At the receiver, the sequence numbers are used to correctly order segments that may
+                                  // be received out of order and to eliminate duplicates. (RFC793 - Reliability)
     tcp_header->ack_seq = 0;
     tcp_header->doff = sizeof(struct tcphdr) / 4;
     tcp_header->urg = 0;
@@ -579,11 +550,12 @@ void portScanner(Options opts)
     tcp_header->rst = 0;
     tcp_header->syn = 1;
     tcp_header->fin = 0;
-    tcp_header->window = htons(14600);
+    tcp_header->window = htons(14600); // The window indicates an allowed number of octets that the sender may transmit
+                                       // before receiving further permission. (RFC793 - Flow Control)
     tcp_header->check = 0;
     tcp_header->urg_ptr = 0;
 
-    printf("sending now to %d...\n", opts.tcp_ports[0]);
+    printf("\nsending now to %d...\n", opts.tcp_ports[0]);
 
     struct sockaddr_in destination_ip;
     destination_ip.sin_family = AF_INET;
@@ -640,11 +612,15 @@ void portScanner(Options opts)
         // sending SYN -> receiving SYN, ACK -> then sending RST to the port, but program prints CLOSED
         if (tcp_head->syn == 1 && tcp_head->ack == 1)
         {
-            printf("%d: OPEN\n", opts.tcp_ports[0]);
+            printf("%d OPEN\n", opts.tcp_ports[0]);
+        }
+        else if (tcp_head->rst == 1)
+        {
+            printf("%d CLOSED\n", opts.tcp_ports[0]);
         }
         else
         {
-            printf("%d: CLOSED\n", opts.tcp_ports[0]);
+            printf("%d FILTERED\n", opts.tcp_ports[0]);
         }
     }
 
@@ -653,11 +629,71 @@ void portScanner(Options opts)
     close(raw_socket);
 }
 
+bool is_program_interrupted = false;
+
+void exitProgram(int signal)
+{
+    is_program_interrupted = true;
+    fprintf(stderr, "[Info] User interrupted the program with signal %d%s.\n", signal, signal == 2 ? " (SIGINT)" : "");
+}
+
+void udpScanner(Options opts)
+{
+    if (opts.udp_ports == NULL)
+    {
+        return;
+    }
+
+    int send_socket = socket(AF_INET, SOCK_DGRAM, 0);
+    if (send_socket < 0)
+    {
+        fprintf(stderr, RED "[Error] " RES "Creating a socket failed, try running with sudo.\n");
+        exit(EXIT_FAILURE);
+    }
+
+    int receive_socket = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
+    if (receive_socket < 0)
+    {
+        fprintf(stderr, RED "[Error] " RES "Creating a socket failed, try running with sudo.\n");
+        close(send_socket);
+        exit(EXIT_FAILURE);
+    }
+
+    char datagram[8192];
+    struct udphdr *udp_header = (struct udphdr *)datagram;
+    (void)udp_header;
+
+    // bind socket to interface
+
+
+    while (1 && !is_program_interrupted)
+    {
+        ;
+    }
+}
+
 int main(int argc, char **argv)
 {
     Options opts = parse_options(argc, argv);
 
-    portScanner(opts);
+    signal(SIGINT, exitProgram);
+
+    char hostname[INET6_ADDRSTRLEN];
+    getTargetHostname(opts, hostname);
+
+    if (strcmp(opts.target, hostname) == 0)
+    {
+        printf("Interesting ports on %s:\n", opts.target);
+    }
+    else
+    {
+        printf("Interesting ports on %s (%s):\n", opts.target, hostname);
+    }
+
+    opts.target = hostname;
+
+    udpScanner(opts);
+    // portScanner(opts);
 
     return 0;
 }
