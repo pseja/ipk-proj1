@@ -23,6 +23,7 @@ typedef uint8_t u_char;
 
 #include <ifaddrs.h>
 #include <signal.h>
+#include <sys/select.h>
 
 #define RED "\e[0;31m"
 #define YEL "\e[0;33m"
@@ -591,40 +592,64 @@ void portScanner(Options opts)
 
     struct sockaddr saddr;
     int saddr_size = sizeof(saddr);
-    unsigned char *buffer = (unsigned char *)malloc(65536);
-    int data_size = recvfrom(response_socket, buffer, 65536, 0, (struct sockaddr *)&saddr, (socklen_t *)&saddr_size);
-    if (data_size < 0)
+    unsigned char buffer[65536];
+
+    // timeout
+    struct timeval tv = {.tv_sec = opts.timeout / 1000, .tv_usec = (opts.timeout % 1000) * 1000};
+    fd_set readfds;
+    FD_ZERO(&readfds);
+    FD_SET(response_socket, &readfds);
+
+    int ret = select(response_socket + 1, &readfds, NULL, NULL, &tv);
+    if (ret == -1)
     {
-        fprintf(stderr, RED "[Error] " RES "Unable to receive packets.\n");
+        fprintf(stderr, RED "[Error] " RED ".\n");
+        close(raw_socket);
+        close(response_socket);
         exit(EXIT_FAILURE);
     }
-
-    struct iphdr *ip_head = (struct iphdr *)buffer;
-    struct sockaddr_in source;
-    unsigned short ip_head_len = ip_head->ihl * 4;
-    struct tcphdr *tcp_head = (struct tcphdr *)(buffer + ip_head_len);
-    memset(&source, 0, sizeof(source));
-    source.sin_addr.s_addr = ip_head->saddr;
-
-    if (ip_head->protocol == IPPROTO_TCP)
+    else if (ret == 0)
     {
-        // doesnt work for now, idk why, in wireshark it looks correct
-        // sending SYN -> receiving SYN, ACK -> then sending RST to the port, but program prints CLOSED
-        if (tcp_head->syn == 1 && tcp_head->ack == 1)
+        // timeout, no data received
+        printf("%d FILTERED\n", opts.tcp_ports[0]);
+    }
+    else
+    {
+        int data_size =
+            recvfrom(response_socket, buffer, 65536, 0, (struct sockaddr *)&saddr, (socklen_t *)&saddr_size);
+        if (data_size < 0)
         {
-            printf("%d OPEN\n", opts.tcp_ports[0]);
+            fprintf(stderr, RED "[Error] " RES "Unable to receive packets.\n");
+            exit(EXIT_FAILURE);
         }
-        else if (tcp_head->rst == 1)
+
+        struct iphdr *ip_head = (struct iphdr *)buffer;
+        struct sockaddr_in source;
+        unsigned short ip_head_len = ip_head->ihl * 4;
+        struct tcphdr *tcp_head = (struct tcphdr *)(buffer + ip_head_len);
+        memset(&source, 0, sizeof(source));
+        source.sin_addr.s_addr = ip_head->saddr;
+
+        if (ip_head->protocol == IPPROTO_TCP)
         {
-            printf("%d CLOSED\n", opts.tcp_ports[0]);
-        }
-        else
-        {
-            printf("%d FILTERED\n", opts.tcp_ports[0]);
+            // TODO doesnt work for localhost
+            // doesnt work for now, idk why, in wireshark it looks correct
+            // sending SYN -> receiving SYN, ACK -> then sending RST to the port, but program prints CLOSED
+            if (tcp_head->syn == 1 && tcp_head->ack == 1)
+            {
+                printf("%d OPEN\n", opts.tcp_ports[0]);
+            }
+            else if (tcp_head->rst == 1)
+            {
+                printf("%d CLOSED\n", opts.tcp_ports[0]);
+            }
+            else
+            {
+                printf("%d FILTERED\n", opts.tcp_ports[0]);
+            }
         }
     }
 
-    free(buffer);
     close(response_socket);
     close(raw_socket);
 }
@@ -665,7 +690,6 @@ void udpScanner(Options opts)
 
     // bind socket to interface
 
-
     while (1 && !is_program_interrupted)
     {
         ;
@@ -692,8 +716,8 @@ int main(int argc, char **argv)
 
     opts.target = hostname;
 
-    udpScanner(opts);
-    // portScanner(opts);
+    // udpScanner(opts);
+    portScanner(opts);
 
     return 0;
 }
