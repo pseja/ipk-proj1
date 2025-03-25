@@ -631,9 +631,8 @@ struct pseudo_header
     struct tcphdr tcp;
 };
 
-int createRawSocket(char *interface, int family, int protocol)
+int createRawSocket(int family, int protocol)
 {
-    // create a raw socket with the given family and protocol
     int raw_socket = socket(family, SOCK_RAW, protocol);
     if (raw_socket < 0)
     {
@@ -642,28 +641,12 @@ int createRawSocket(char *interface, int family, int protocol)
         exit(EXIT_FAILURE);
     }
 
-    // set the socket to non-blocking
-    int flags = fcntl(raw_socket, F_GETFL, 0);
-    if (fcntl(raw_socket, F_SETFL, flags | O_NONBLOCK) < 0)
-    {
-        fprintf(stderr, RED "[Error] " RES "Setting socket to non-blocking failed.\n");
-        close(raw_socket);
-        exit(EXIT_FAILURE);
-    }
-
-    // bind the socket to the given interface
-    if (setsockopt(raw_socket, SOL_SOCKET, SO_BINDTODEVICE, interface, strlen(interface)) < 0)
-    {
-        fprintf(stderr, RED "[Error] " RES "Binding socket to interface %s failed.\n", interface);
-        close(raw_socket);
-        exit(EXIT_FAILURE);
-    }
-
     return raw_socket;
 }
 
 // packet size in bytes
 #define PACKET_SIZE 8192
+#define SOURCE_PORT 42069
 
 // bitset for storing the ports, steal this from my ijc_proj1
 void tcpScanner(Options opts, int port)
@@ -676,7 +659,7 @@ void tcpScanner(Options opts, int port)
 
     if (opts.target_type == TARGET_IPV4)
     {
-        int raw_socket = createRawSocket(opts.interface, AF_INET, IPPROTO_RAW);
+        int raw_socket = createRawSocket(AF_INET, IPPROTO_RAW);
 
         struct sockaddr_in server_addr;
         memset(&server_addr, 0, sizeof(server_addr));
@@ -704,7 +687,7 @@ void tcpScanner(Options opts, int port)
         ip_header->ihl = 5;     // 20 byte header
         ip_header->tos = 0;
         ip_header->tot_len = sizeof(struct ip) + sizeof(struct tcphdr);
-        ip_header->id = htons(42069);       // hehe, maybe later random number generator?
+        ip_header->id = htons(SOURCE_PORT);       // hehe, maybe later random number generator?
         ip_header->frag_off = htons(16384); // don't fragment
         ip_header->ttl = 255;               // maximum ttl because why not
         ip_header->protocol = IPPROTO_TCP;
@@ -714,7 +697,7 @@ void tcpScanner(Options opts, int port)
         ip_header->check = checkSum((unsigned short *)datagram, ip_header->tot_len);
 
         // tcp header based on RFC 793
-        tcp_header->source = htons(42069);
+        tcp_header->source = htons(SOURCE_PORT);
         tcp_header->dest = htons(port); // set the dest to the actual target_port
         tcp_header->seq = htonl(
             sequence_number++); // At the receiver, the sequence numbers are used to correctly order segments that may
@@ -835,7 +818,7 @@ void tcpScanner(Options opts, int port)
     }
     else if (opts.target_type == TARGET_IPV6)
     {
-        int raw_socket = createRawSocket(opts.interface, AF_INET6, IPPROTO_RAW);
+        int raw_socket = createRawSocket(AF_INET6, IPPROTO_RAW);
 
         // Set up the destination address
         struct sockaddr_in6 server_addr;
@@ -871,11 +854,9 @@ void tcpScanner(Options opts, int port)
         ip6_header->ip6_hops = 255;                              // Hop limit
         ip6_header->ip6_dst = server_ip;                         // Destination address
         ip6_header->ip6_src = source_ip;                         // Source address
-        // inet_pton(AF_INET6, ip_addr, &ip6_header->ip6_src);       // Source address
-        // inet_pton(AF_INET6, opts.target, &ip6_header->ip6_dst);   // Destination address
 
         // Fill in the TCP header
-        tcp_header->source = htons(42069);
+        tcp_header->source = htons(SOURCE_PORT);
         tcp_header->dest = htons(port);
         tcp_header->seq = htonl(sequence_number++);
         tcp_header->ack_seq = 0;
