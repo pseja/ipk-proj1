@@ -666,7 +666,7 @@ int createRawSocket(char *interface, int family, int protocol)
 #define PACKET_SIZE 8192
 
 // bitset for storing the ports, steal this from my ijc_proj1
-void tcpScanner(Options opts)
+void tcpScanner(Options opts, int port)
 {
     if (opts.tcp_ports == NULL)
     {
@@ -676,12 +676,12 @@ void tcpScanner(Options opts)
 
     if (opts.target_type == TARGET_IPV4)
     {
-        int raw_socket = createRawSocket(opts.interface, AF_INET, IPPROTO_TCP);
+        int raw_socket = createRawSocket(opts.interface, AF_INET, IPPROTO_RAW);
 
-        // struct sockaddr_in server_addr;
-        // memset(&server_addr, 0, sizeof(server_addr));
-        // server_addr.sin_family = AF_INET;
-        // inet_pton(AF_INET, opts.target, &server_addr.sin_addr);
+        struct sockaddr_in server_addr;
+        memset(&server_addr, 0, sizeof(server_addr));
+        server_addr.sin_family = AF_INET;
+        inet_pton(AF_INET, opts.target, &server_addr.sin_addr);
 
         char ip_addr[INET_ADDRSTRLEN];
         getInterfaceAddress(opts.interface, AF_INET, ip_addr, sizeof(ip_addr));
@@ -715,7 +715,7 @@ void tcpScanner(Options opts)
 
         // tcp header based on RFC 793
         tcp_header->source = htons(42069);
-        tcp_header->dest = htons(opts.tcp_ports[0]); // set the dest to the actual target_port
+        tcp_header->dest = htons(port); // set the dest to the actual target_port
         tcp_header->seq = htonl(
             sequence_number++); // At the receiver, the sequence numbers are used to correctly order segments that may
                                 // be received out of order and to eliminate duplicates. (RFC793 - Reliability)
@@ -732,11 +732,11 @@ void tcpScanner(Options opts)
         tcp_header->check = 0;
         tcp_header->urg_ptr = 0;
 
-        printf("\nsending now to %d...\n", opts.tcp_ports[0]);
+        printf("\nsending now to %d...\n", port);
 
         struct sockaddr_in destination_ip;
         destination_ip.sin_family = AF_INET;
-        destination_ip.sin_port = htons(opts.tcp_ports[0]); // set the dest to the actual target_port
+        destination_ip.sin_port = htons(port); // set the dest to the actual target_port
         destination_ip.sin_addr.s_addr = server_ip.s_addr;
 
         struct pseudo_header psh;
@@ -759,7 +759,7 @@ void tcpScanner(Options opts)
             exit(EXIT_FAILURE);
         }
 
-        printf("Successfully sent SYN packet to %s port %d\n", opts.target, opts.tcp_ports[0]);
+        printf("Successfully sent SYN packet to %s port %d\n", opts.target, port);
 
         int response_socket = socket(AF_INET, SOCK_RAW, IPPROTO_TCP);
         if (response_socket < 0)
@@ -791,7 +791,7 @@ void tcpScanner(Options opts)
         {
             // timeout, no data received
             printf("timeout\n");
-            printf("%s %d filtered\n", opts.target, opts.tcp_ports[0]);
+            printf("%s %d filtered\n", opts.target, port);
         }
         else
         {
@@ -815,17 +815,17 @@ void tcpScanner(Options opts)
             {
                 if (tcp_head->syn == 1 && tcp_head->ack == 1)
                 {
-                    printf("%s %d tcp open\n", opts.target, opts.tcp_ports[0]);
+                    printf("%s %d tcp open\n", opts.target, port);
                 }
                 else if (tcp_head->rst == 1)
                 {
-                    printf("%s %d tcp closed\n", opts.target, opts.tcp_ports[0]);
+                    printf("%s %d tcp closed\n", opts.target, port);
                 }
                 else
                 {
                     printf("idk what happened here\n");
                     printf("syn: %d, ack: %d, rst: %d\n", tcp_head->syn, tcp_head->ack, tcp_head->rst);
-                    printf("%s %d tcp filtered\n", opts.target, opts.tcp_ports[0]);
+                    printf("%s %d tcp filtered\n", opts.target, port);
                 }
             }
         }
@@ -876,7 +876,7 @@ void tcpScanner(Options opts)
 
         // Fill in the TCP header
         tcp_header->source = htons(42069);
-        tcp_header->dest = htons(opts.tcp_ports[0]);
+        tcp_header->dest = htons(port);
         tcp_header->seq = htonl(sequence_number++);
         tcp_header->ack_seq = 0;
         tcp_header->doff = sizeof(struct tcphdr) / 4;
@@ -890,11 +890,11 @@ void tcpScanner(Options opts)
         tcp_header->check = 0;
         tcp_header->urg_ptr = 0;
 
-        printf("\nsending now to %d...\n", opts.tcp_ports[0]);
+        printf("\nsending now to %d...\n", port);
 
         struct sockaddr_in6 destination_ip;
         destination_ip.sin6_family = AF_INET6;
-        destination_ip.sin6_port = htons(opts.tcp_ports[0]);
+        destination_ip.sin6_port = htons(port);
         destination_ip.sin6_addr = server_ip;
 
         // Pseudo-header for checksum calculation
@@ -930,7 +930,7 @@ void tcpScanner(Options opts)
             close(raw_socket);
             exit(EXIT_FAILURE);
         }
-        printf("Successfully sent SYN packet to %s port %d\n", opts.target, opts.tcp_ports[0]);
+        printf("Successfully sent SYN packet to %s port %d\n", opts.target, port);
 
         // Receive the response
         int response_socket = socket(AF_INET6, SOCK_RAW, IPPROTO_TCP);
@@ -963,7 +963,7 @@ void tcpScanner(Options opts)
         {
             // Timeout, no data received
             printf("timeoutv6\n");
-            printf("%s %d tcp filtered\n", opts.target, opts.tcp_ports[0]);
+            printf("%s %d tcp filtered\n", opts.target, port);
         }
         else
         {
@@ -984,17 +984,17 @@ void tcpScanner(Options opts)
 
             if (tcp_head->syn == 1 && tcp_head->ack == 1)
             {
-                printf("%s %d tcp open\n", opts.target, opts.tcp_ports[0]);
+                printf("%s %d tcp open\n", opts.target, port);
             }
             else if (tcp_head->rst == 1)
             {
-                printf("%s %d tcp closed\n", opts.target, opts.tcp_ports[0]);
+                printf("%s %d tcp closed\n", opts.target, port);
             }
             else
             {
                 printf("idk what happened herev6\n");
                 printf("syn: %d, ack: %d, rst: %d\n", tcp_head->syn, tcp_head->ack, tcp_head->rst);
-                printf("%s %d tcp filtered\n", opts.target, opts.tcp_ports[0]);
+                printf("%s %d tcp filtered\n", opts.target, port);
             }
         }
 
@@ -1016,7 +1016,7 @@ void exitProgram(int signal)
     fprintf(stderr, "[Info] User interrupted the program with signal %d%s.\n", signal, signal == 2 ? " (SIGINT)" : "");
 }
 
-void udpScanner(Options opts)
+void udpScanner(Options opts, int port)
 {
     if (opts.udp_ports == NULL)
     {
@@ -1026,7 +1026,7 @@ void udpScanner(Options opts)
 
     struct sockaddr_in destination_ip;
     destination_ip.sin_family = AF_INET;
-    destination_ip.sin_port = htons(opts.udp_ports[0]);
+    destination_ip.sin_port = htons(port);
 
     if ((destination_ip.sin_addr.s_addr = inet_addr(opts.target)) == INADDR_NONE)
     {
@@ -1078,7 +1078,7 @@ void udpScanner(Options opts)
     else if (ret == 0)
     {
         // timeout, no data received
-        printf("%d FILTERED\n", opts.tcp_ports[0]);
+        printf("%d FILTERED\n", port);
     }
     else
     {
@@ -1097,11 +1097,11 @@ void udpScanner(Options opts)
 
         if (icmp_header->type == 3 && icmp_header->code == 3)
         {
-            printf("%d CLOSED\n", opts.udp_ports[0]);
+            printf("%d CLOSED\n", port);
         }
         else
         {
-            printf("%d OPEN\n", opts.udp_ports[0]);
+            printf("%d OPEN\n", port);
         }
     }
 
@@ -1113,32 +1113,31 @@ int main(int argc, char **argv)
 {
     Options opts = parse_options(argc, argv);
 
-    // signal(SIGINT, exitProgram);
+    signal(SIGINT, exitProgram);
 
-    // char hostname[INET6_ADDRSTRLEN];
-    // getTargetHostname(&opts, hostname);
-    // opts.target = hostname;
+    char hostname[INET6_ADDRSTRLEN];
+    getTargetHostname(&opts, hostname);
+    opts.target = hostname;
 
-    if (opts.udp_ports)
-    {
-        for (int i = 0; i < opts.udp_port_count; i++)
-        {
-            printf("udp %d\n", opts.udp_ports[i]);
-        }
-        free(opts.udp_ports);
-    }
+    // if (opts.udp_ports)
+    // {
+    //     for (int i = 0; i < opts.udp_port_count; i++)
+    //     {
+    //         printf("udp %d\n", opts.udp_ports[i]);
+    //         udpScanner(opts, opts.udp_ports[i]);
+    //     }
+    //     free(opts.udp_ports);
+    // }
 
     if (opts.tcp_ports)
     {
         for (int i = 0; i < opts.tcp_port_count; i++)
         {
             printf("tcp %d\n", opts.tcp_ports[i]);
+            tcpScanner(opts, opts.tcp_ports[i]);
         }
         free(opts.tcp_ports);
     }
-
-    // udpScanner(opts);
-    // tcpScanner(opts);
 
     return 0;
 }
