@@ -16,6 +16,7 @@ typedef uint8_t u_char;
 #include <pcap.h>
 
 #include <netdb.h>
+#include <netinet/in.h>
 #include <netinet/ip.h>
 #include <netinet/ip6.h>
 #include <netinet/ip_icmp.h>
@@ -26,8 +27,6 @@ typedef uint8_t u_char;
 #include <ifaddrs.h>
 #include <signal.h>
 #include <sys/select.h>
-
-#include <fcntl.h>
 
 #define RED "\e[0;31m"
 #define YEL "\e[0;33m"
@@ -594,6 +593,7 @@ void getTargetHostname(Options *opts, char *hostname)
     freeaddrinfo(res);
 }
 
+// source: https://datatracker.ietf.org/doc/html/rfc1071#section-4.1
 unsigned short checkSum(unsigned short *datagram, int packet_size)
 {
     register long sum;
@@ -620,16 +620,6 @@ unsigned short checkSum(unsigned short *datagram, int packet_size)
 
     return result;
 }
-
-struct pseudo_header
-{
-    u_int32_t source_address;
-    u_int32_t dest_address;
-    u_int8_t placeholder;
-    u_int8_t protocol;
-    u_int16_t tcp_length;
-    struct tcphdr tcp;
-};
 
 int createRawSocket(int family, int protocol)
 {
@@ -659,46 +649,42 @@ void tcpScanner(Options opts, int port)
 
     if (opts.target_type == TARGET_IPV4)
     {
-        int raw_socket = createRawSocket(AF_INET, IPPROTO_RAW);
+        char datagram[4096]; // sizeof(struct iphdr) + sizeof(struct tcphdr)
+        memset(datagram, 0, sizeof(datagram));
 
-        struct sockaddr_in server_addr;
-        memset(&server_addr, 0, sizeof(server_addr));
-        server_addr.sin_family = AF_INET;
-        inet_pton(AF_INET, opts.target, &server_addr.sin_addr);
+        // IPv4 header and TCP header
+        struct iphdr *ip_header = (struct iphdr *)datagram;
+        struct tcphdr *tcp_header = (struct tcphdr *)(datagram + sizeof(struct iphdr));
 
         char ip_addr[INET_ADDRSTRLEN];
         getInterfaceAddress(opts.interface, AF_INET, ip_addr, sizeof(ip_addr));
 
-        printf("interface %s ipv4 address %s\n", opts.interface, ip_addr);
-
-        char datagram[4096];
-        memset(datagram, 0, sizeof(datagram));
-
-        struct iphdr *ip_header = (struct iphdr *)datagram;
-        struct tcphdr *tcp_header = (struct tcphdr *)(datagram + sizeof(struct ip));
-
-        static int sequence_number = 0;
-
         struct in_addr server_ip;
         server_ip.s_addr = inet_addr(opts.target);
 
+        fprintf(stderr, "interface %s ipv4 address %s\n", opts.interface, ip_addr);
+
         // ip header based on RFC 791
-        ip_header->version = 4; // ipv4
-        ip_header->ihl = 5;     // 20 byte header
+        // source: https://datatracker.ietf.org/doc/html/rfc791
+        ip_header->version = 4;
+        ip_header->ihl = 5;
         ip_header->tos = 0;
         ip_header->tot_len = sizeof(struct ip) + sizeof(struct tcphdr);
-        ip_header->id = htons(SOURCE_PORT);       // hehe, maybe later random number generator?
-        ip_header->frag_off = htons(16384); // don't fragment
-        ip_header->ttl = 255;               // maximum ttl because why not
+        ip_header->id = htons(SOURCE_PORT);
+        ip_header->frag_off = htons(16384); // don't fragment flag
+        ip_header->ttl = 255;
         ip_header->protocol = IPPROTO_TCP;
         ip_header->check = 0; // initially has to be 0
         ip_header->saddr = inet_addr(ip_addr);
-        ip_header->daddr = server_ip.s_addr; // destination ip
+        ip_header->daddr = server_ip.s_addr;
         ip_header->check = checkSum((unsigned short *)datagram, ip_header->tot_len);
 
+        static int sequence_number = 0;
+
         // tcp header based on RFC 793
+        // source: https://datatracker.ietf.org/doc/html/rfc793
         tcp_header->source = htons(SOURCE_PORT);
-        tcp_header->dest = htons(port); // set the dest to the actual target_port
+        tcp_header->dest = htons(port);
         tcp_header->seq = htonl(
             sequence_number++); // At the receiver, the sequence numbers are used to correctly order segments that may
                                 // be received out of order and to eliminate duplicates. (RFC793 - Reliability)
@@ -715,35 +701,48 @@ void tcpScanner(Options opts, int port)
         tcp_header->check = 0;
         tcp_header->urg_ptr = 0;
 
-        printf("\nsending now to %d...\n", port);
+        fprintf(stderr, "\nsending now to %d...\n", port);
 
-        struct sockaddr_in destination_ip;
-        destination_ip.sin_family = AF_INET;
-        destination_ip.sin_port = htons(port); // set the dest to the actual target_port
-        destination_ip.sin_addr.s_addr = server_ip.s_addr;
-
-        struct pseudo_header psh;
+        struct pseudo_header
+        {
+            u_int32_t source_address;
+            u_int32_t dest_address;
+            u_int8_t placeholder;
+            u_int8_t protocol;
+            u_int16_t tcp_length;
+            struct tcphdr tcp;
+        } psh;
         psh.source_address = inet_addr(ip_addr);
-        psh.dest_address = destination_ip.sin_addr.s_addr;
+        psh.dest_address = server_ip.s_addr;
         psh.placeholder = 0;
         psh.protocol = IPPROTO_TCP;
         psh.tcp_length = htons(sizeof(struct tcphdr));
 
-        // copy tcp header into pseudo header
+        // Copy the TCP header into the pseudo header
         memcpy(&psh.tcp, tcp_header, sizeof(struct tcphdr));
         tcp_header->check = checkSum((unsigned short *)&psh, sizeof(struct pseudo_header));
 
+        // Setup the destination address for sendto
+        struct sockaddr_in destination_socket_address;
+        destination_socket_address.sin_family = AF_INET;
+        destination_socket_address.sin_port = htons(port);
+        destination_socket_address.sin_addr.s_addr = server_ip.s_addr;
+
+        int raw_socket = createRawSocket(AF_INET, IPPROTO_RAW);
+
+        // Send the packet
         if (sendto(raw_socket, datagram, sizeof(struct iphdr) + sizeof(struct tcphdr), 0,
-                   (struct sockaddr *)&destination_ip, sizeof(destination_ip)) < 0)
+                   (struct sockaddr *)&destination_socket_address, sizeof(destination_socket_address)) < 0)
         {
-            printf("%s\n", opts.target);
+            fprintf(stderr, "%s\n", opts.target);
             fprintf(stderr, RED "[Error] " RES "Sending SYN packet failed.\n");
             close(raw_socket);
             exit(EXIT_FAILURE);
         }
 
-        printf("Successfully sent SYN packet to %s port %d\n", opts.target, port);
+        fprintf(stderr, "Successfully sent SYN packet to %s port %d\n", opts.target, port);
 
+        // Creating a socket for the response
         int response_socket = socket(AF_INET, SOCK_RAW, IPPROTO_TCP);
         if (response_socket < 0)
         {
@@ -752,17 +751,15 @@ void tcpScanner(Options opts, int port)
             exit(EXIT_FAILURE);
         }
 
-        struct sockaddr saddr;
-        int saddr_size = sizeof(saddr);
-        unsigned char buffer[65536];
-
-        // timeout
+        // Timeout for receiving the packet
         struct timeval tv = {.tv_sec = opts.timeout / 1000, .tv_usec = (opts.timeout % 1000) * 1000};
         fd_set readfds;
         FD_ZERO(&readfds);
         FD_SET(response_socket, &readfds);
 
+        // Using select for timeout
         int ret = select(response_socket + 1, &readfds, NULL, NULL, &tv);
+        // Select failed
         if (ret == -1)
         {
             fprintf(stderr, RED "[Error] " RED "Select failed.\n");
@@ -770,16 +767,19 @@ void tcpScanner(Options opts, int port)
             close(response_socket);
             exit(EXIT_FAILURE);
         }
+        // Select timed out (no data was received in time)
         else if (ret == 0)
         {
-            // timeout, no data received
-            printf("timeout\n");
             printf("%s %d filtered\n", opts.target, port);
         }
         else
         {
-            // nefunguje na localhost
-            if (recvfrom(response_socket, buffer, 65536, 0, (struct sockaddr *)&saddr, (socklen_t *)&saddr_size) < 0)
+            struct sockaddr socket_address;
+            int socket_address_size = sizeof(socket_address);
+            unsigned char buffer[65536];
+
+            if (recvfrom(response_socket, buffer, 65536, 0, (struct sockaddr *)&socket_address,
+                         (socklen_t *)&socket_address_size) < 0)
             {
                 fprintf(stderr, RED "[Error] " RES "Unable to receive packets.\n");
                 close(raw_socket);
@@ -787,12 +787,11 @@ void tcpScanner(Options opts, int port)
                 exit(EXIT_FAILURE);
             }
 
+            // the buffer i received is both the ip header and the tcp header of the packet so I need to split them and
+            // calculate the correct offset of the tcp header for correct parsing
             struct iphdr *ip_head = (struct iphdr *)buffer;
-            struct sockaddr_in source;
             unsigned short ip_head_len = ip_head->ihl * 4;
             struct tcphdr *tcp_head = (struct tcphdr *)(buffer + ip_head_len);
-            memset(&source, 0, sizeof(source));
-            source.sin_addr.s_addr = ip_head->saddr;
 
             if (ip_head->protocol == IPPROTO_TCP)
             {
@@ -806,8 +805,6 @@ void tcpScanner(Options opts, int port)
                 }
                 else
                 {
-                    printf("idk what happened here\n");
-                    printf("syn: %d, ack: %d, rst: %d\n", tcp_head->syn, tcp_head->ack, tcp_head->rst);
                     printf("%s %d tcp filtered\n", opts.target, port);
                 }
             }
@@ -818,31 +815,21 @@ void tcpScanner(Options opts, int port)
     }
     else if (opts.target_type == TARGET_IPV6)
     {
-        int raw_socket = createRawSocket(AF_INET6, IPPROTO_RAW);
-
-        // Set up the destination address
-        struct sockaddr_in6 server_addr;
-        memset(&server_addr, 0, sizeof(server_addr));
-        server_addr.sin6_family = AF_INET6;
-        inet_pton(AF_INET6, opts.target, &server_addr.sin6_addr);
-
-        char ip_addr[INET6_ADDRSTRLEN];
-        getInterfaceAddress(opts.interface, AF_INET6, ip_addr, sizeof(ip_addr));
-
-        printf("interface %s ipv6 address %s\n", opts.interface, ip_addr);
-
         // Prepare the datagram buffer
-        char datagram[4096];
+        char datagram[4096]; // sizeof(struct ip6_hdr + struct tcphdr)
         memset(datagram, 0, sizeof(datagram));
 
         // IPv6 header and TCP header
         struct ip6_hdr *ip6_header = (struct ip6_hdr *)datagram;
         struct tcphdr *tcp_header = (struct tcphdr *)(datagram + sizeof(struct ip6_hdr));
 
-        static int sequence_number = 0;
+        char ip_addr[INET6_ADDRSTRLEN];
+        getInterfaceAddress(opts.interface, AF_INET6, ip_addr, sizeof(ip_addr));
 
-        struct in6_addr server_ip;
-        inet_pton(AF_INET6, opts.target, &server_ip);
+        fprintf(stderr, "interface %s ipv6 address %s\n", opts.interface, ip_addr);
+
+        struct in6_addr destination_ip;
+        inet_pton(AF_INET6, opts.target, &destination_ip);
 
         struct in6_addr source_ip;
         inet_pton(AF_INET6, ip_addr, &source_ip);
@@ -852,8 +839,10 @@ void tcpScanner(Options opts, int port)
         ip6_header->ip6_plen = htons(sizeof(struct tcphdr));     // Payload length
         ip6_header->ip6_nxt = IPPROTO_TCP;                       // Next header (TCP)
         ip6_header->ip6_hops = 255;                              // Hop limit
-        ip6_header->ip6_dst = server_ip;                         // Destination address
+        ip6_header->ip6_dst = destination_ip;                    // Destination address
         ip6_header->ip6_src = source_ip;                         // Source address
+
+        static int sequence_number = 0;
 
         // Fill in the TCP header
         tcp_header->source = htons(SOURCE_PORT);
@@ -871,12 +860,7 @@ void tcpScanner(Options opts, int port)
         tcp_header->check = 0;
         tcp_header->urg_ptr = 0;
 
-        printf("\nsending now to %d...\n", port);
-
-        struct sockaddr_in6 destination_ip;
-        destination_ip.sin6_family = AF_INET6;
-        destination_ip.sin6_port = htons(port);
-        destination_ip.sin6_addr = server_ip;
+        fprintf(stderr, "\nsending now to %d...\n", port);
 
         // Pseudo-header for checksum calculation
         struct pseudo_header_v6
@@ -891,29 +875,36 @@ void tcpScanner(Options opts, int port)
 
         psh.source_address = ip6_header->ip6_src;
         psh.dest_address = ip6_header->ip6_dst;
-
         psh.placeholder[0] = 0;
         psh.placeholder[1] = 0;
         psh.placeholder[2] = 0;
-
         psh.next_header = IPPROTO_TCP;
         psh.tcp_length = htonl(sizeof(struct tcphdr));
 
         memcpy(&psh.tcp, tcp_header, sizeof(struct tcphdr));
         tcp_header->check = checkSum((unsigned short *)&psh, sizeof(struct pseudo_header_v6));
 
+        // Setup the destination address for sendto
+        struct sockaddr_in6 destination_socket_address;
+        destination_socket_address.sin6_family = AF_INET6;
+        destination_socket_address.sin6_port = htons(port);
+        destination_socket_address.sin6_addr = destination_ip;
+
+        int raw_socket = createRawSocket(AF_INET6, IPPROTO_RAW);
+
         // Send the packet
         if (sendto(raw_socket, datagram, sizeof(struct ip6_hdr) + sizeof(struct tcphdr), 0,
-                   (struct sockaddr *)&destination_ip, sizeof(destination_ip)) < 0)
+                   (struct sockaddr *)&destination_socket_address, sizeof(destination_socket_address)) < 0)
         {
-            printf("%s\n", opts.target);
+            fprintf(stderr, "%s\n", opts.target);
             fprintf(stderr, RED "[Error] " RES "Sending SYN packet failed.\n");
             close(raw_socket);
             exit(EXIT_FAILURE);
         }
-        printf("Successfully sent SYN packet to %s port %d\n", opts.target, port);
 
-        // Receive the response
+        fprintf(stderr, "Successfully sent SYN packet to %s port %d\n", opts.target, port);
+
+        // Creating a socket for the response
         int response_socket = socket(AF_INET6, SOCK_RAW, IPPROTO_TCP);
         if (response_socket < 0)
         {
@@ -922,17 +913,15 @@ void tcpScanner(Options opts, int port)
             exit(EXIT_FAILURE);
         }
 
-        struct sockaddr saddr;
-        int saddr_size = sizeof(saddr);
-        unsigned char buffer[65536];
-
         // Set timeout for receiving
         struct timeval tv = {.tv_sec = opts.timeout / 1000, .tv_usec = (opts.timeout % 1000) * 1000};
         fd_set readfds;
         FD_ZERO(&readfds);
         FD_SET(response_socket, &readfds);
 
+        // Using select for timeout
         int ret = select(response_socket + 1, &readfds, NULL, NULL, &tv);
+        // Select failed
         if (ret == -1)
         {
             fprintf(stderr, RED "[Error] " RES "Select failed.\n");
@@ -940,15 +929,21 @@ void tcpScanner(Options opts, int port)
             close(response_socket);
             exit(EXIT_FAILURE);
         }
+        // Select timed out (no data was received in time)
         else if (ret == 0)
         {
             // Timeout, no data received
-            printf("timeoutv6\n");
+            fprintf(stderr, "timeoutv6\n");
             printf("%s %d tcp filtered\n", opts.target, port);
         }
         else
         {
-            if (recvfrom(response_socket, buffer, 65536, 0, (struct sockaddr *)&saddr, (socklen_t *)&saddr_size) < 0)
+            struct sockaddr socket_address;
+            int socket_address_size = sizeof(socket_address);
+            unsigned char buffer[65536];
+
+            if (recvfrom(response_socket, buffer, 65536, 0, (struct sockaddr *)&socket_address,
+                         (socklen_t *)&socket_address_size) < 0)
             {
                 fprintf(stderr, RED "[Error] " RES "Unable to receive packets.\n");
                 close(raw_socket);
@@ -956,12 +951,9 @@ void tcpScanner(Options opts, int port)
                 exit(EXIT_FAILURE);
             }
 
-            struct ip6_hdr *ip_head = (struct ip6_hdr *)buffer;
-            struct sockaddr_in6 source;
-            unsigned short ip_head_len = ip_head->ip6_ctlun.ip6_un1.ip6_un1_plen;
-            struct tcphdr *tcp_head = (struct tcphdr *)(buffer + ip_head_len);
-            memset(&source, 0, sizeof(source));
-            source.sin6_addr = ip_head->ip6_src;
+            // the buffer I received is just the TCP part of the packet, so there is no need for IP header offset
+            // calculation
+            struct tcphdr *tcp_head = (struct tcphdr *)(buffer);
 
             if (tcp_head->syn == 1 && tcp_head->ack == 1)
             {
@@ -973,8 +965,6 @@ void tcpScanner(Options opts, int port)
             }
             else
             {
-                printf("idk what happened herev6\n");
-                printf("syn: %d, ack: %d, rst: %d\n", tcp_head->syn, tcp_head->ack, tcp_head->rst);
                 printf("%s %d tcp filtered\n", opts.target, port);
             }
         }
