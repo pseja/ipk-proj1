@@ -594,7 +594,7 @@ void getTargetHostname(Options *opts, char *hostname)
 }
 
 // source: https://datatracker.ietf.org/doc/html/rfc1071#section-4.1
-unsigned short checkSum(unsigned short *datagram, int packet_size)
+unsigned short checkSum(unsigned short *segment, int packet_size)
 {
     register long sum;
     unsigned short odd_byte;
@@ -603,14 +603,14 @@ unsigned short checkSum(unsigned short *datagram, int packet_size)
     sum = 0;
     while (packet_size > 1)
     {
-        sum += *datagram++;
+        sum += *segment++;
         packet_size -= 2;
     }
 
     if (packet_size == 1)
     {
         odd_byte = 0;
-        *((u_char *)&odd_byte) = *(u_char *)datagram;
+        *((u_char *)&odd_byte) = *(u_char *)segment;
         sum += odd_byte;
     }
 
@@ -638,23 +638,16 @@ int createRawSocket(int family, int protocol)
 #define PACKET_SIZE 8192
 #define SOURCE_PORT 42069
 
-// bitset for storing the ports, steal this from my ijc_proj1
 void tcpScanner(Options opts, int port)
 {
-    if (opts.tcp_ports == NULL)
-    {
-        fprintf(stderr, "[Info] No TCP ports specified...\n");
-        return;
-    }
-
     if (opts.target_type == TARGET_IPV4)
     {
-        char datagram[4096]; // sizeof(struct iphdr) + sizeof(struct tcphdr)
-        memset(datagram, 0, sizeof(datagram));
+        char segment[4096]; // sizeof(struct iphdr) + sizeof(struct tcphdr)
+        memset(segment, 0, sizeof(segment));
 
         // IPv4 header and TCP header
-        struct iphdr *ip_header = (struct iphdr *)datagram;
-        struct tcphdr *tcp_header = (struct tcphdr *)(datagram + sizeof(struct iphdr));
+        struct iphdr *ip_header = (struct iphdr *)segment;
+        struct tcphdr *tcp_header = (struct tcphdr *)(segment + sizeof(struct iphdr));
 
         char ip_addr[INET_ADDRSTRLEN];
         getInterfaceAddress(opts.interface, AF_INET, ip_addr, sizeof(ip_addr));
@@ -677,7 +670,7 @@ void tcpScanner(Options opts, int port)
         ip_header->check = 0; // initially has to be 0
         ip_header->saddr = inet_addr(ip_addr);
         ip_header->daddr = server_ip.s_addr;
-        ip_header->check = checkSum((unsigned short *)datagram, ip_header->tot_len);
+        ip_header->check = checkSum((unsigned short *)segment, ip_header->tot_len);
 
         static int sequence_number = 0;
 
@@ -731,7 +724,7 @@ void tcpScanner(Options opts, int port)
         int raw_socket = createRawSocket(AF_INET, IPPROTO_RAW);
 
         // Send the packet
-        if (sendto(raw_socket, datagram, sizeof(struct iphdr) + sizeof(struct tcphdr), 0,
+        if (sendto(raw_socket, segment, sizeof(struct iphdr) + sizeof(struct tcphdr), 0,
                    (struct sockaddr *)&destination_socket_address, sizeof(destination_socket_address)) < 0)
         {
             fprintf(stderr, "%s\n", opts.target);
@@ -762,7 +755,7 @@ void tcpScanner(Options opts, int port)
         // Select failed
         if (ret == -1)
         {
-            fprintf(stderr, RED "[Error] " RED "Select failed.\n");
+            fprintf(stderr, RED "[Error] " RES "Select failed.\n");
             close(raw_socket);
             close(response_socket);
             exit(EXIT_FAILURE);
@@ -778,7 +771,7 @@ void tcpScanner(Options opts, int port)
             int socket_address_size = sizeof(socket_address);
             unsigned char buffer[65536];
 
-            if (recvfrom(response_socket, buffer, 65536, 0, (struct sockaddr *)&socket_address,
+            if (recvfrom(response_socket, buffer, sizeof(buffer), 0, (struct sockaddr *)&socket_address,
                          (socklen_t *)&socket_address_size) < 0)
             {
                 fprintf(stderr, RED "[Error] " RES "Unable to receive packets.\n");
@@ -815,13 +808,13 @@ void tcpScanner(Options opts, int port)
     }
     else if (opts.target_type == TARGET_IPV6)
     {
-        // Prepare the datagram buffer
-        char datagram[4096]; // sizeof(struct ip6_hdr + struct tcphdr)
-        memset(datagram, 0, sizeof(datagram));
+        // Prepare the segment buffer
+        char segment[4096]; // sizeof(struct ip6_hdr + struct tcphdr)
+        memset(segment, 0, sizeof(segment));
 
         // IPv6 header and TCP header
-        struct ip6_hdr *ip6_header = (struct ip6_hdr *)datagram;
-        struct tcphdr *tcp_header = (struct tcphdr *)(datagram + sizeof(struct ip6_hdr));
+        struct ip6_hdr *ip6_header = (struct ip6_hdr *)segment;
+        struct tcphdr *tcp_header = (struct tcphdr *)(segment + sizeof(struct ip6_hdr));
 
         char ip_addr[INET6_ADDRSTRLEN];
         getInterfaceAddress(opts.interface, AF_INET6, ip_addr, sizeof(ip_addr));
@@ -893,7 +886,7 @@ void tcpScanner(Options opts, int port)
         int raw_socket = createRawSocket(AF_INET6, IPPROTO_RAW);
 
         // Send the packet
-        if (sendto(raw_socket, datagram, sizeof(struct ip6_hdr) + sizeof(struct tcphdr), 0,
+        if (sendto(raw_socket, segment, sizeof(struct ip6_hdr) + sizeof(struct tcphdr), 0,
                    (struct sockaddr *)&destination_socket_address, sizeof(destination_socket_address)) < 0)
         {
             fprintf(stderr, "%s\n", opts.target);
@@ -989,95 +982,166 @@ void exitProgram(int signal)
 
 void udpScanner(Options opts, int port)
 {
-    if (opts.udp_ports == NULL)
+    if (opts.target_type == TARGET_IPV4)
     {
-        fprintf(stderr, YEL "[Warning] " RED "UDP ports are empty, skipping them...\n");
-        return;
-    }
+        char datagram[4096];
+        memset(datagram, 0, sizeof(datagram));
 
-    struct sockaddr_in destination_ip;
-    destination_ip.sin_family = AF_INET;
-    destination_ip.sin_port = htons(port);
+        struct iphdr *ip_header = (struct iphdr *)datagram;
+        struct udphdr *udp_header = (struct udphdr *)(datagram + sizeof(struct iphdr));
 
-    if ((destination_ip.sin_addr.s_addr = inet_addr(opts.target)) == INADDR_NONE)
-    {
-        fprintf(stderr, RED "[Error] " RES "Invalid target IP address.\n");
-        return;
-    }
+        char ip_addr[INET_ADDRSTRLEN];
+        getInterfaceAddress(opts.interface, AF_INET, ip_addr, sizeof(ip_addr));
 
-    int send_socket = socket(AF_INET, SOCK_DGRAM, 0);
-    if (send_socket < 0)
-    {
-        perror("[Error] Creating a UDP socket failed");
-        exit(EXIT_FAILURE);
-    }
+        struct in_addr server_ip;
+        server_ip.s_addr = inet_addr(opts.target);
 
-    char buffer[] = "pseja - udp message";
-    if (sendto(send_socket, buffer, sizeof(buffer), 0, (struct sockaddr *)&destination_ip, sizeof(destination_ip)) < 0)
-    {
-        perror("[Error] Sending UDP packet failed");
-        close(send_socket);
-        exit(EXIT_FAILURE);
-    }
+        fprintf(stderr, "interface %s ipv4 address %s\n", opts.interface, ip_addr);
 
-    int receive_socket = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
-    if (receive_socket < 0)
-    {
-        perror("[Error] Creating raw socket failed.\n");
-        close(send_socket);
-        exit(EXIT_FAILURE);
-    }
+        // ip header based on RFC 791
+        // source: https://datatracker.ietf.org/doc/html/rfc791
+        ip_header->version = 4;
+        ip_header->ihl = 5;
+        ip_header->tos = 0;
+        ip_header->tot_len = sizeof(struct ip) + sizeof(struct udphdr);
+        ip_header->id = htons(SOURCE_PORT);
+        ip_header->frag_off = htons(16384); // don't fragment flag
+        ip_header->ttl = 255;
+        ip_header->protocol = IPPROTO_UDP;
+        ip_header->check = 0; // initially has to be 0
+        ip_header->saddr = inet_addr(ip_addr);
+        ip_header->daddr = server_ip.s_addr;
+        ip_header->check = checkSum((unsigned short *)datagram, ip_header->tot_len);
 
-    char receive_buffer[1024];
-    struct sockaddr_in address;
-    socklen_t address_len = sizeof(address);
+        // buffer with a message
+        // char buffer[] = "";
 
-    // timeout
-    struct timeval tv = {.tv_sec = opts.timeout / 1000, .tv_usec = (opts.timeout % 1000) * 1000};
-    fd_set readfds;
-    FD_ZERO(&readfds);
-    FD_SET(receive_socket, &readfds);
+        // udp header based on RFC 768
+        // source: https://datatracker.ietf.org/doc/html/rfc768
+        udp_header->source = htons(SOURCE_PORT);
+        udp_header->dest = htons(port);
+        udp_header->len = htons(sizeof(struct udphdr));
+        udp_header->check = 0;
 
-    int ret = select(receive_socket + 1, &readfds, NULL, NULL, &tv);
-    if (ret == -1)
-    {
-        fprintf(stderr, RED "[Error] " RED "Select failed.\n");
-        close(send_socket);
-        close(receive_socket);
-        exit(EXIT_FAILURE);
-    }
-    else if (ret == 0)
-    {
-        // timeout, no data received
-        printf("%d FILTERED\n", port);
-    }
-    else
-    {
-        ssize_t recv_len = recvfrom(receive_socket, receive_buffer, sizeof(receive_buffer), 0,
-                                    (struct sockaddr *)&address, &address_len);
-        if (recv_len < 0)
+        struct pseudo_header
         {
-            perror("[Error] recvfrom failed");
-            close(send_socket);
-            close(receive_socket);
+            u_int32_t source_address;
+            u_int32_t dest_address;
+            u_int8_t placeholder;
+            u_int8_t protocol;
+            u_int16_t udp_length;
+            struct udphdr udp;
+        } psh;
+        psh.source_address = inet_addr(ip_addr);
+        psh.dest_address = server_ip.s_addr;
+        psh.placeholder = 0;
+        psh.protocol = IPPROTO_UDP;
+        psh.udp_length = htons(sizeof(struct udphdr));
+
+        // Copy the UDP header into the pseudo header
+        memcpy(&psh.udp, udp_header, sizeof(struct udphdr));
+        udp_header->check = checkSum((unsigned short *)&psh, sizeof(struct pseudo_header));
+
+        // Setup the destination address for sendto
+        struct sockaddr_in destination_socket_address;
+        destination_socket_address.sin_family = AF_INET;
+        destination_socket_address.sin_port = htons(port);
+        destination_socket_address.sin_addr.s_addr = server_ip.s_addr;
+
+        int raw_socket = createRawSocket(AF_INET, IPPROTO_RAW);
+
+        if (sendto(raw_socket, datagram, sizeof(struct iphdr) + sizeof(struct udphdr), 0,
+                   (struct sockaddr *)&destination_socket_address, sizeof(destination_socket_address)) < 0)
+        {
+            perror("[Error] Sending UDP packet failed");
+            close(raw_socket);
             exit(EXIT_FAILURE);
         }
 
-        struct iphdr *ip_header = (struct iphdr *)receive_buffer;
-        struct icmphdr *icmp_header = (struct icmphdr *)(receive_buffer + (ip_header->ihl * 4));
+        fprintf(stderr, "Successfully sent UDP packet to %s port %d\n", opts.target, port);
 
-        if (icmp_header->type == 3 && icmp_header->code == 3)
+        int response_socket = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
+        if (response_socket < 0)
         {
-            printf("%d CLOSED\n", port);
+            fprintf(stderr, RED "[Error] " RES "Creating a socket failed, try running with sudo.\n");
+            close(raw_socket);
+            exit(EXIT_FAILURE);
+        }
+
+        // Timeout for receiving the packet
+        struct timeval tv = {.tv_sec = opts.timeout / 1000, .tv_usec = (opts.timeout % 1000) * 1000};
+        fd_set readfds;
+        FD_ZERO(&readfds);
+        FD_SET(response_socket, &readfds);
+
+        // Using select for timeout
+        int ret = select(response_socket + 1, &readfds, NULL, NULL, &tv);
+        // Select failed
+        if (ret == -1)
+        {
+            fprintf(stderr, RED "[Error] " RES "Select failed.\n");
+            close(raw_socket);
+            close(response_socket);
+            exit(EXIT_FAILURE);
+        }
+        else if (ret == 0)
+        {
+            printf("%s %d udp open\n", opts.target, port);
         }
         else
         {
-            printf("%d OPEN\n", port);
-        }
-    }
+            struct sockaddr_in socket_address;
+            socklen_t socket_address_length = sizeof(socket_address);
+            char buffer[65536];
 
-    close(send_socket);
-    close(receive_socket);
+            ssize_t recv_len = recvfrom(response_socket, buffer, sizeof(buffer), 0, (struct sockaddr *)&socket_address,
+                                        &socket_address_length);
+            if (recv_len < 0)
+            {
+                fprintf(stderr, RED "[Error] " RES "Unable to receive packets.\n");
+                close(raw_socket);
+                close(response_socket);
+                exit(EXIT_FAILURE);
+            }
+
+            // Debug: Print the raw buffer
+            printf("Received buffer (hex):\n");
+            for (ssize_t i = 0; i < recv_len; i++)
+            {
+                printf("%02x ", (unsigned char)buffer[i]);
+                if ((i + 1) % 16 == 0)
+                {
+                    printf("\n");
+                }
+            }
+            printf("\n");
+
+            struct iphdr *ip_head = (struct iphdr *)buffer;
+            unsigned short ip_head_len = ip_head->ihl * 4;
+            struct icmphdr *icmp_head = (struct icmphdr *)(buffer + ip_head_len);
+
+            if (icmp_head->type == 3 && icmp_head->code == 3)
+            {
+                printf("%s %d udp closed\n", opts.target, port);
+            }
+            else
+            {
+                printf("%s %d udp open\n", opts.target, port);
+            }
+        }
+
+        close(raw_socket);
+        close(response_socket);
+    }
+    else if (opts.target_type == TARGET_IPV6)
+    {
+        fprintf(stderr, RED "[Error] " RES "IPv6 UDP scanning is not implemented yet.\n");
+    }
+    else
+    {
+        fprintf(stderr, RED "[Error] " RES "Unknown target type.\n");
+        exit(EXIT_FAILURE);
+    }
 }
 
 int main(int argc, char **argv)
@@ -1090,15 +1154,15 @@ int main(int argc, char **argv)
     getTargetHostname(&opts, hostname);
     opts.target = hostname;
 
-    // if (opts.udp_ports)
-    // {
-    //     for (int i = 0; i < opts.udp_port_count; i++)
-    //     {
-    //         printf("udp %d\n", opts.udp_ports[i]);
-    //         udpScanner(opts, opts.udp_ports[i]);
-    //     }
-    //     free(opts.udp_ports);
-    // }
+    if (opts.udp_ports)
+    {
+        for (int i = 0; i < opts.udp_port_count; i++)
+        {
+            printf("udp %d\n", opts.udp_ports[i]);
+            udpScanner(opts, opts.udp_ports[i]);
+        }
+        free(opts.udp_ports);
+    }
 
     if (opts.tcp_ports)
     {
