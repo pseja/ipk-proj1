@@ -204,7 +204,7 @@ int isCommaSeparatedList(const char *input, int *ports, int *count)
     buffer[sizeof(buffer) - 1] = '\0';
 
     char *token = strtok(buffer, ",");
-    int temp_ports[256], temp_count = 0;
+    int uports[256], temp_count = 0;
 
     while (token)
     {
@@ -213,11 +213,11 @@ int isCommaSeparatedList(const char *input, int *ports, int *count)
         {
             return 0;
         }
-        temp_ports[temp_count++] = port;
+        uports[temp_count++] = port;
         token = strtok(NULL, ",");
     }
 
-    memcpy(ports, temp_ports, temp_count * sizeof(int));
+    memcpy(ports, uports, temp_count * sizeof(int));
     *count = temp_count;
 
     return 1;
@@ -285,7 +285,9 @@ typedef struct Options
 {
     char *interface;
     int *udp_ports;
+    int udp_port_count;
     int *tcp_ports;
+    int tcp_port_count;
     int timeout;
     char *target;
     TargetType target_type;
@@ -365,15 +367,38 @@ Options parse_options(int argc, char **argv)
                 exit(EXIT_FAILURE);
             }
 
-            int uport, uports[65535], ucount, ustart, uend;
-            if (!isSingleNumber(optarg, &uport) && !isCommaSeparatedList(optarg, uports, &ucount) &&
-                !isValidRange(optarg, &ustart, &uend))
+            int uports[65535], ucount = 0;
+            int ustart, uend, uport;
+
+            if (isSingleNumber(optarg, &uport))
             {
-                fprintf(stderr, RED "[Error] " RES "Invalid UDP port range\n");
+                uports[ucount++] = uport;
+            }
+            else if (isCommaSeparatedList(optarg, uports, &ucount))
+            {
+                // Ports already stored in uports[]
+            }
+            else if (isValidRange(optarg, &ustart, &uend))
+            {
+                for (int i = ustart; i <= uend; i++)
+                {
+                    uports[ucount++] = i;
+                }
+            }
+            else
+            {
+                fprintf(stderr, "[Error] Invalid UDP port format: %s\n", optarg);
                 exit(EXIT_FAILURE);
             }
 
-            opts.udp_ports = uports;
+            opts.udp_ports = malloc(ucount * sizeof(int));
+            if (!opts.udp_ports)
+            {
+                fprintf(stderr, "[Error] Memory allocation failed\n");
+                exit(EXIT_FAILURE);
+            }
+            memcpy(opts.udp_ports, uports, ucount * sizeof(int));
+            opts.udp_port_count = ucount;
             break;
         case 't':
             if (opts.tcp_ports != NULL)
@@ -382,15 +407,38 @@ Options parse_options(int argc, char **argv)
                 exit(EXIT_FAILURE);
             }
 
-            int tport, tports[65535], tcount, tstart, tend;
-            if (!isSingleNumber(optarg, &tport) && !isCommaSeparatedList(optarg, tports, &tcount) &&
-                !isValidRange(optarg, &tstart, &tend))
+            int tports[65535], tcount = 0;
+            int tstart, tend, tport;
+
+            if (isSingleNumber(optarg, &tport))
             {
-                fprintf(stderr, RED "[Error] " RES "Invalid TCP port range\n");
+                tports[tcount++] = tport;
+            }
+            else if (isCommaSeparatedList(optarg, tports, &tcount))
+            {
+                // Ports already stored in uports[]
+            }
+            else if (isValidRange(optarg, &tstart, &tend))
+            {
+                for (int i = tstart; i <= tend; i++)
+                {
+                    tports[tcount++] = i;
+                }
+            }
+            else
+            {
+                fprintf(stderr, "[Error] Invalid TCP port format: %s\n", optarg);
                 exit(EXIT_FAILURE);
             }
 
-            opts.tcp_ports = tports;
+            opts.tcp_ports = malloc(tcount * sizeof(int));
+            if (!opts.tcp_ports)
+            {
+                fprintf(stderr, "[Error] Memory allocation failed\n");
+                exit(EXIT_FAILURE);
+            }
+            memcpy(opts.tcp_ports, tports, tcount * sizeof(int));
+            opts.tcp_port_count = tcount;
             break;
         case 'w': {
             if (!regmatch("^[1-9][0-9]*$", optarg))
@@ -1064,13 +1112,30 @@ void udpScanner(Options opts)
 int main(int argc, char **argv)
 {
     Options opts = parse_options(argc, argv);
-    (void)opts;
 
     // signal(SIGINT, exitProgram);
 
     // char hostname[INET6_ADDRSTRLEN];
     // getTargetHostname(&opts, hostname);
     // opts.target = hostname;
+
+    if (opts.udp_ports)
+    {
+        for (int i = 0; i < opts.udp_port_count; i++)
+        {
+            printf("udp %d\n", opts.udp_ports[i]);
+        }
+        free(opts.udp_ports);
+    }
+
+    if (opts.tcp_ports)
+    {
+        for (int i = 0; i < opts.tcp_port_count; i++)
+        {
+            printf("tcp %d\n", opts.tcp_ports[i]);
+        }
+        free(opts.tcp_ports);
+    }
 
     // udpScanner(opts);
     // tcpScanner(opts);
