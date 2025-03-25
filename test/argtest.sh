@@ -20,7 +20,7 @@ RED="\033[0;31m"
 NORMAL="\033[0m"
 
 # change this based on your valid interface
-VALID_INTERFACE="wlo1"
+VALID_INTERFACE="eth0"
 
 IPK_L4_SCAN="./ipk-l4-scan"
 test_count=0
@@ -95,12 +95,12 @@ run_test "Valid IPv4 - broadcast" "-i ${VALID_INTERFACE} -w 3000 -u 80,443 255.2
 run_test "Valid IPv4 - loopback" "-i ${VALID_INTERFACE} -w 3000 -u 80,443 127.0.0.1" 0
 run_test "Valid IPv4 - loopback as text" "-i ${VALID_INTERFACE} -w 3000 -u 80,443 localhost" 0
 run_test "Valid IPv4 - zero Address" "-i ${VALID_INTERFACE} -w 3000 -u 80,443 0.0.0.0" 0
+run_test "Valid IPv4 - missing octets should be auto filled" "-i ${VALID_INTERFACE} -w 3000 -u 80,443 192.168.1" 0
 
 #### invalid
 run_test "Invalid IPv4 - too many octets" "-i ${VALID_INTERFACE} -w 3000 -u 80,443 192.168.1.1.1" 1
 run_test "Invalid IPv4 - octet out of range" "-i ${VALID_INTERFACE} -w 3000 -u 80,443 256.100.50.25" 1
 run_test "Invalid IPv4 - negative value" "-i ${VALID_INTERFACE} -w 3000 -u 80,443 -1.0.0.1" 1
-run_test "Invalid IPv4 - missing octets" "-i ${VALID_INTERFACE} -w 3000 -u 80,443 192.168.1" 1
 run_test "Invalid IPv4 - letters in address" "-i ${VALID_INTERFACE} -w 3000 -u 80,443 192.abc.1.1" 1
 
 ### IPv6
@@ -124,18 +124,13 @@ run_test "Invalid IPv6 address - invalid IPv4 part, \"999\" is out of range 0-25
 
 ### URL
 #### valid
-run_test "Valid URL - standard HTTP" "-i ${VALID_INTERFACE} -w 3000 -u 80,443 http://example.com" 0
-run_test "Valid URL - standard HTTPS" "-i ${VALID_INTERFACE} -w 3000 -u 80,443 https://example.com" 0
-run_test "Valid URL - subdomain" "-i ${VALID_INTERFACE} -w 3000 -u 80,443 https://sub.example.com" 0
-run_test "Valid URL - with port" "-i ${VALID_INTERFACE} -w 3000 -u 80,443 https://example.com:8080" 0
-run_test "Valid URL - with path" "-i ${VALID_INTERFACE} -w 3000 -u 80,443 https://example.com/path/to/page" 0
-run_test "Valid URL - with query params" "-i ${VALID_INTERFACE} -w 3000 -u 80,443 https://example.com/search?q=test" 0
+run_test "Valid URL - subdomain" "-i ${VALID_INTERFACE} -w 3000 -u 80,443 scanme.nmap.org" 0
+run_test "Valid URL - no scheme" "-i ${VALID_INTERFACE} -w 3000 -u 80,443 example.com" 0
 
 #### invalid
-run_test "Invalid URL - missing TLD" "-i ${VALID_INTERFACE} -w 3000 -u 80,443 http://example" 1
-run_test "Invalid URL - spaces in URL" "-i ${VALID_INTERFACE} -w 3000 -u 80,443 http://exa mple.com" 1
-run_test "Invalid URL - no scheme" "-i ${VALID_INTERFACE} -w 3000 -u 80,443 example.com" 1
-run_test "Invalid URL - invalid characters" "-i ${VALID_INTERFACE} -w 3000 -u 80,443 http://exa*ample.com" 1
+run_test "Invalid URL - missing TLD" "-i ${VALID_INTERFACE} -w 3000 -u 80,443 google" 1
+run_test "Invalid URL - spaces in URL" "-i ${VALID_INTERFACE} -w 3000 -u 80,443 go\ ogle.com" 1
+run_test "Invalid URL - invalid characters" "-i ${VALID_INTERFACE} -w 3000 -u 80,443 go*ogle.com" 1
 run_test "Invalid URL - empty URL" "-i ${VALID_INTERFACE} -w 3000 -u 80,443 " 1
 
 # print test results

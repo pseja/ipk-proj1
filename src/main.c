@@ -27,6 +27,8 @@ typedef uint8_t u_char;
 #include <signal.h>
 #include <sys/select.h>
 
+#include <fcntl.h>
+
 #define RED "\e[0;31m"
 #define YEL "\e[0;33m"
 #define BLK "\e[0;30m"
@@ -149,7 +151,8 @@ void printNetworkInterfaces()
     pcap_if_t *temp = interfaces;
     while (temp != NULL)
     {
-        printf(UWHT "%s" RES " - %s\n", temp->name, temp->description == NULL ? "User's network interface" : temp->description);
+        printf(UWHT "%s" RES " - %s\n", temp->name,
+               temp->description == NULL ? "User's network interface" : temp->description);
         printExtraInterfaceInfo(temp->name);
         temp = temp->next;
     }
@@ -239,35 +242,35 @@ int isValidRange(const char *input, int *start, int *end)
     return isValidPortNumber(*start) && isValidPortNumber(*end) && (*start <= *end);
 }
 
-// source: https://stackoverflow.com/a/17773849
 bool isValidUrl(const char *url)
 {
-    (void)url;
-    return 1; // TODO fix url regex, because scanme.nmap.org is valid but the regex doesn't take it as valid, returning
-              // true for everything for now
-    // return regmatch("^(https?://[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}|www\\.[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,})$", url) ||
-    // strcmp("localhost", url) == 0;
+    struct addrinfo hints;
+    struct addrinfo *result;
+
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+
+    int status = getaddrinfo(url, NULL, &hints, &result);
+    if (status != 0)
+    {
+        return false;
+    }
+
+    freeaddrinfo(result);
+    return true;
 }
 
-// source: https://stackoverflow.com/a/36760050
-bool isValidIpv4(const char *ipv4)
+bool isValidIpv4(const char *ip)
 {
-    return regmatch(
-        "^((25[0-5]|(2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9]))\\.){3}(25[0-5]|(2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9]))$",
-        ipv4);
+    struct in_addr addr;
+    return inet_pton(AF_INET, ip, &addr) == 1;
 }
 
-// source: https://stackoverflow.com/a/17871737
-bool isValidIpv6(const char *ipv6)
+bool isValidIpv6(const char *ip)
 {
-    return regmatch("^(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-"
-                    "9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-"
-                    "F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-"
-                    "F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-"
-                    "9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,"
-                    "1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-"
-                    "4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))$",
-                    ipv6);
+    struct in6_addr addr;
+    return inet_pton(AF_INET6, ip, &addr) == 1;
 }
 
 typedef enum
@@ -362,7 +365,7 @@ Options parse_options(int argc, char **argv)
                 exit(EXIT_FAILURE);
             }
 
-            int uport, uports[65535], ucount, ustart, uend; // TODO use bitset for this
+            int uport, uports[65535], ucount, ustart, uend;
             if (!isSingleNumber(optarg, &uport) && !isCommaSeparatedList(optarg, uports, &ucount) &&
                 !isValidRange(optarg, &ustart, &uend))
             {
@@ -379,7 +382,7 @@ Options parse_options(int argc, char **argv)
                 exit(EXIT_FAILURE);
             }
 
-            int tport, tports[65535], tcount, tstart, tend; // TODO use bitset for this
+            int tport, tports[65535], tcount, tstart, tend;
             if (!isSingleNumber(optarg, &tport) && !isCommaSeparatedList(optarg, tports, &tcount) &&
                 !isValidRange(optarg, &tstart, &tend))
             {
@@ -488,8 +491,8 @@ int getInterfaceAddress(const char *interface_name, int family, char *address, s
 
     if (!found)
     {
-        fprintf(stderr, "Interface %s with family %s not found.\n",
-                interface_name, (family == AF_INET) ? "IPv4" : "IPv6");
+        fprintf(stderr, "Interface %s with family %s not found.\n", interface_name,
+                (family == AF_INET) ? "IPv4" : "IPv6");
         return -1;
     }
 
@@ -504,7 +507,7 @@ void getTargetHostname(Options *opts, char *hostname)
 
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_STREAM; // TODO change to SOCK_RAW
+    hints.ai_socktype = SOCK_STREAM;
 
     if ((status = getaddrinfo(opts->target, NULL, &hints, &res)) != 0)
     {
@@ -580,6 +583,40 @@ struct pseudo_header
     struct tcphdr tcp;
 };
 
+int createRawSocket(char *interface, int family, int protocol)
+{
+    // create a raw socket with the given family and protocol
+    int raw_socket = socket(family, SOCK_RAW, protocol);
+    if (raw_socket < 0)
+    {
+        fprintf(stderr, RED "[Error] " RES "Creating an %s socket failed, try running with sudo.\n",
+                family == AF_INET ? "IPv4" : "IPv6");
+        exit(EXIT_FAILURE);
+    }
+
+    // set the socket to non-blocking
+    int flags = fcntl(raw_socket, F_GETFL, 0);
+    if (fcntl(raw_socket, F_SETFL, flags | O_NONBLOCK) < 0)
+    {
+        fprintf(stderr, RED "[Error] " RES "Setting socket to non-blocking failed.\n");
+        close(raw_socket);
+        exit(EXIT_FAILURE);
+    }
+
+    // bind the socket to the given interface
+    if (setsockopt(raw_socket, SOL_SOCKET, SO_BINDTODEVICE, interface, strlen(interface)) < 0)
+    {
+        fprintf(stderr, RED "[Error] " RES "Binding socket to interface %s failed.\n", interface);
+        close(raw_socket);
+        exit(EXIT_FAILURE);
+    }
+
+    return raw_socket;
+}
+
+// packet size in bytes
+#define PACKET_SIZE 8192
+
 // bitset for storing the ports, steal this from my ijc_proj1
 void tcpScanner(Options opts)
 {
@@ -591,19 +628,12 @@ void tcpScanner(Options opts)
 
     if (opts.target_type == TARGET_IPV4)
     {
-        int raw_socket = socket(AF_INET, SOCK_RAW, IPPROTO_RAW);
-        if (raw_socket < 0)
-        {
-            fprintf(stderr, RED "[Error] " RES "Creating an IPv4 socket failed, try running with sudo.\n");
-            exit(EXIT_FAILURE);
-        }
+        int raw_socket = createRawSocket(opts.interface, AF_INET, IPPROTO_TCP);
 
-        struct sockaddr_in server_addr;
-        memset(&server_addr, 0, sizeof(server_addr));
-        server_addr.sin_family = AF_INET;
-        inet_pton(AF_INET, opts.target, &server_addr.sin_addr);
-
-        printf("%s\n", opts.target);
+        // struct sockaddr_in server_addr;
+        // memset(&server_addr, 0, sizeof(server_addr));
+        // server_addr.sin_family = AF_INET;
+        // inet_pton(AF_INET, opts.target, &server_addr.sin_addr);
 
         char ip_addr[INET_ADDRSTRLEN];
         getInterfaceAddress(opts.interface, AF_INET, ip_addr, sizeof(ip_addr));
@@ -611,12 +641,12 @@ void tcpScanner(Options opts)
         printf("interface %s ipv4 address %s\n", opts.interface, ip_addr);
 
         char datagram[4096];
+        memset(datagram, 0, sizeof(datagram));
+
         struct iphdr *ip_header = (struct iphdr *)datagram;
         struct tcphdr *tcp_header = (struct tcphdr *)(datagram + sizeof(struct ip));
 
-        memset(datagram, 0, 4096);
-
-        static int sequence_number = 69;
+        static int sequence_number = 0;
 
         struct in_addr server_ip;
         server_ip.s_addr = inet_addr(opts.target);
@@ -638,9 +668,9 @@ void tcpScanner(Options opts)
         // tcp header based on RFC 793
         tcp_header->source = htons(42069);
         tcp_header->dest = htons(opts.tcp_ports[0]); // set the dest to the actual target_port
-        tcp_header->seq =
-            htonl(sequence_number++); // At the receiver, the sequence numbers are used to correctly order segments that may
-                                    // be received out of order and to eliminate duplicates. (RFC793 - Reliability)
+        tcp_header->seq = htonl(
+            sequence_number++); // At the receiver, the sequence numbers are used to correctly order segments that may
+                                // be received out of order and to eliminate duplicates. (RFC793 - Reliability)
         tcp_header->ack_seq = 0;
         tcp_header->doff = sizeof(struct tcphdr) / 4;
         tcp_header->urg = 0;
@@ -649,8 +679,8 @@ void tcpScanner(Options opts)
         tcp_header->rst = 0;
         tcp_header->syn = 1;
         tcp_header->fin = 0;
-        tcp_header->window = htons(14600); // The window indicates an allowed number of octets that the sender may transmit
-                                        // before receiving further permission. (RFC793 - Flow Control)
+        tcp_header->window = htons(14600); // The window indicates an allowed number of octets that the sender may
+                                           // transmit before receiving further permission. (RFC793 - Flow Control)
         tcp_header->check = 0;
         tcp_header->urg_ptr = 0;
 
@@ -673,19 +703,21 @@ void tcpScanner(Options opts)
         tcp_header->check = checkSum((unsigned short *)&psh, sizeof(struct pseudo_header));
 
         if (sendto(raw_socket, datagram, sizeof(struct iphdr) + sizeof(struct tcphdr), 0,
-                (struct sockaddr *)&destination_ip, sizeof(destination_ip)) < 0)
+                   (struct sockaddr *)&destination_ip, sizeof(destination_ip)) < 0)
         {
             printf("%s\n", opts.target);
             fprintf(stderr, RED "[Error] " RES "Sending SYN packet failed.\n");
+            close(raw_socket);
             exit(EXIT_FAILURE);
         }
 
-        printf("successfully sent\n");
+        printf("Successfully sent SYN packet to %s port %d\n", opts.target, opts.tcp_ports[0]);
 
         int response_socket = socket(AF_INET, SOCK_RAW, IPPROTO_TCP);
         if (response_socket < 0)
         {
             fprintf(stderr, RED "[Error] " RES "Creating a socket failed, try running with sudo.\n");
+            close(raw_socket);
             exit(EXIT_FAILURE);
         }
 
@@ -719,6 +751,8 @@ void tcpScanner(Options opts)
             if (recvfrom(response_socket, buffer, 65536, 0, (struct sockaddr *)&saddr, (socklen_t *)&saddr_size) < 0)
             {
                 fprintf(stderr, RED "[Error] " RES "Unable to receive packets.\n");
+                close(raw_socket);
+                close(response_socket);
                 exit(EXIT_FAILURE);
             }
 
@@ -731,7 +765,6 @@ void tcpScanner(Options opts)
 
             if (ip_head->protocol == IPPROTO_TCP)
             {
-                // TODO doesnt work for localhost
                 if (tcp_head->syn == 1 && tcp_head->ack == 1)
                 {
                     printf("%s %d tcp open\n", opts.target, opts.tcp_ports[0]);
@@ -743,6 +776,7 @@ void tcpScanner(Options opts)
                 else
                 {
                     printf("idk what happened here\n");
+                    printf("syn: %d, ack: %d, rst: %d\n", tcp_head->syn, tcp_head->ack, tcp_head->rst);
                     printf("%s %d tcp filtered\n", opts.target, opts.tcp_ports[0]);
                 }
             }
@@ -753,13 +787,7 @@ void tcpScanner(Options opts)
     }
     else if (opts.target_type == TARGET_IPV6)
     {
-        // Create a raw socket for IPv6
-        int raw_socket = socket(AF_INET6, SOCK_RAW, IPPROTO_RAW);
-        if (raw_socket < 0)
-        {
-            fprintf(stderr, RED "[Error] " RES "Creating an IPv6 socket failed, try running with sudo.\n");
-            exit(EXIT_FAILURE);
-        }
+        int raw_socket = createRawSocket(opts.interface, AF_INET6, IPPROTO_RAW);
 
         // Set up the destination address
         struct sockaddr_in6 server_addr;
@@ -780,15 +808,23 @@ void tcpScanner(Options opts)
         struct ip6_hdr *ip6_header = (struct ip6_hdr *)datagram;
         struct tcphdr *tcp_header = (struct tcphdr *)(datagram + sizeof(struct ip6_hdr));
 
-        // Fill in the IPv6 header
-        ip6_header->ip6_flow = htonl((6 << 28) | (0 << 20) | 0);  // Version, Traffic Class, Flow Label
-        ip6_header->ip6_plen = htons(sizeof(struct tcphdr));      // Payload length
-        ip6_header->ip6_nxt = IPPROTO_TCP;                        // Next header (TCP)
-        ip6_header->ip6_hops = 255;                               // Hop limit
-        inet_pton(AF_INET6, ip_addr, &ip6_header->ip6_src);       // Source address
-        inet_pton(AF_INET6, opts.target, &ip6_header->ip6_dst);   // Destination address
+        static int sequence_number = 0;
 
-        static int sequence_number = 69;
+        struct in6_addr server_ip;
+        inet_pton(AF_INET6, opts.target, &server_ip);
+
+        struct in6_addr source_ip;
+        inet_pton(AF_INET6, ip_addr, &source_ip);
+
+        // Fill in the IPv6 header
+        ip6_header->ip6_flow = htonl((6 << 28) | (0 << 20) | 0); // Version, Traffic Class, Flow Label
+        ip6_header->ip6_plen = htons(sizeof(struct tcphdr));     // Payload length
+        ip6_header->ip6_nxt = IPPROTO_TCP;                       // Next header (TCP)
+        ip6_header->ip6_hops = 255;                              // Hop limit
+        ip6_header->ip6_dst = server_ip;                         // Destination address
+        ip6_header->ip6_src = source_ip;                         // Source address
+        // inet_pton(AF_INET6, ip_addr, &ip6_header->ip6_src);       // Source address
+        // inet_pton(AF_INET6, opts.target, &ip6_header->ip6_dst);   // Destination address
 
         // Fill in the TCP header
         tcp_header->source = htons(42069);
@@ -806,6 +842,13 @@ void tcpScanner(Options opts)
         tcp_header->check = 0;
         tcp_header->urg_ptr = 0;
 
+        printf("\nsending now to %d...\n", opts.tcp_ports[0]);
+
+        struct sockaddr_in6 destination_ip;
+        destination_ip.sin6_family = AF_INET6;
+        destination_ip.sin6_port = htons(opts.tcp_ports[0]);
+        destination_ip.sin6_addr = server_ip;
+
         // Pseudo-header for checksum calculation
         struct pseudo_header_v6
         {
@@ -817,20 +860,24 @@ void tcpScanner(Options opts)
             struct tcphdr tcp;
         } psh;
 
-        memset(&psh, 0, sizeof(psh));
         psh.source_address = ip6_header->ip6_src;
         psh.dest_address = ip6_header->ip6_dst;
-        psh.tcp_length = htonl(sizeof(struct tcphdr));
-        psh.next_header = IPPROTO_TCP;
-        memcpy(&psh.tcp, tcp_header, sizeof(struct tcphdr));
 
-        // Calculate the TCP checksum
-        tcp_header->check = checkSum((unsigned short *)&psh, sizeof(psh));
+        psh.placeholder[0] = 0;
+        psh.placeholder[1] = 0;
+        psh.placeholder[2] = 0;
+
+        psh.next_header = IPPROTO_TCP;
+        psh.tcp_length = htonl(sizeof(struct tcphdr));
+
+        memcpy(&psh.tcp, tcp_header, sizeof(struct tcphdr));
+        tcp_header->check = checkSum((unsigned short *)&psh, sizeof(struct pseudo_header_v6));
 
         // Send the packet
         if (sendto(raw_socket, datagram, sizeof(struct ip6_hdr) + sizeof(struct tcphdr), 0,
-                (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
+                   (struct sockaddr *)&destination_ip, sizeof(destination_ip)) < 0)
         {
+            printf("%s\n", opts.target);
             fprintf(stderr, RED "[Error] " RES "Sending SYN packet failed.\n");
             close(raw_socket);
             exit(EXIT_FAILURE);
@@ -846,8 +893,8 @@ void tcpScanner(Options opts)
             exit(EXIT_FAILURE);
         }
 
-        struct sockaddr_in6 source_addr;
-        socklen_t source_addr_len = sizeof(source_addr);
+        struct sockaddr saddr;
+        int saddr_size = sizeof(saddr);
         unsigned char buffer[65536];
 
         // Set timeout for receiving
@@ -872,7 +919,7 @@ void tcpScanner(Options opts)
         }
         else
         {
-            if (recvfrom(response_socket, buffer, sizeof(buffer), 0, (struct sockaddr *)&source_addr, &source_addr_len) < 0)
+            if (recvfrom(response_socket, buffer, 65536, 0, (struct sockaddr *)&saddr, (socklen_t *)&saddr_size) < 0)
             {
                 fprintf(stderr, RED "[Error] " RES "Unable to receive packets.\n");
                 close(raw_socket);
@@ -880,20 +927,25 @@ void tcpScanner(Options opts)
                 exit(EXIT_FAILURE);
             }
 
-            // struct ip6_hdr *recv_ip6_header = (struct ip6_hdr *)buffer;
-            struct tcphdr *recv_tcp_header = (struct tcphdr *)(buffer + sizeof(struct ip6_hdr));
+            struct ip6_hdr *ip_head = (struct ip6_hdr *)buffer;
+            struct sockaddr_in6 source;
+            unsigned short ip_head_len = ip_head->ip6_ctlun.ip6_un1.ip6_un1_plen;
+            struct tcphdr *tcp_head = (struct tcphdr *)(buffer + ip_head_len);
+            memset(&source, 0, sizeof(source));
+            source.sin6_addr = ip_head->ip6_src;
 
-            if (recv_tcp_header->syn == 1 && recv_tcp_header->ack == 1)
+            if (tcp_head->syn == 1 && tcp_head->ack == 1)
             {
                 printf("%s %d tcp open\n", opts.target, opts.tcp_ports[0]);
             }
-            else if (recv_tcp_header->rst == 1)
+            else if (tcp_head->rst == 1)
             {
                 printf("%s %d tcp closed\n", opts.target, opts.tcp_ports[0]);
             }
             else
             {
                 printf("idk what happened herev6\n");
+                printf("syn: %d, ack: %d, rst: %d\n", tcp_head->syn, tcp_head->ack, tcp_head->rst);
                 printf("%s %d tcp filtered\n", opts.target, opts.tcp_ports[0]);
             }
         }
@@ -1012,15 +1064,16 @@ void udpScanner(Options opts)
 int main(int argc, char **argv)
 {
     Options opts = parse_options(argc, argv);
+    (void)opts;
 
-    signal(SIGINT, exitProgram);
+    // signal(SIGINT, exitProgram);
 
-    char hostname[INET6_ADDRSTRLEN];
-    getTargetHostname(&opts, hostname);
-    opts.target = hostname;
+    // char hostname[INET6_ADDRSTRLEN];
+    // getTargetHostname(&opts, hostname);
+    // opts.target = hostname;
 
     // udpScanner(opts);
-    tcpScanner(opts);
+    // tcpScanner(opts);
 
     return 0;
 }
