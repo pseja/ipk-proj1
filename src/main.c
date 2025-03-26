@@ -1,4 +1,3 @@
-#include <cstdint>
 #define _GNU_SOURCE
 #include <getopt.h>
 #include <net/if.h>
@@ -35,6 +34,29 @@ typedef uint8_t u_char;
 #define BLK "\e[0;30m"
 #define RES "\e[0m"
 #define UWHT "\e[4;37m"
+
+void printHelpMessage()
+{
+    printf("Usage:\n");
+    printf("./ipk-l4-scan [-i interface | --interface interface] [--pu port-ranges | --pt port-ranges | -u port-ranges "
+           "| -t port-ranges] {-w timeout} [hostname | ip-address]\n");
+    printf("./ipk-l4-scan --help | ./ipk-l4-scan -h\n");
+    printf("./ipk-l4-scan --interface | ./ipk-l4-scan -i\n");
+    printf("./ipk-l4-scan\n");
+    printf("\nwhere:\n");
+    printf("    -h/--help writes usage instructions to stdout and terminates.\n");
+    printf("    -i eth0/--interface eth0. If this parameter is not specified (and any other parameters as well), or if "
+           "only -i/--interface is specified without a value (and any other parameters are unspecified), a list of "
+           "active interfaces is printed.");
+    printf("    -t/--pt, -u/--pu port-ranges - scanned tcp/udp ports, allowed entry e.g., --pt 22 or --pu 1-65535 or "
+           "--pt 22,23,24. The --pu and --pt arguments can be specified separately, i.e. they do not have to occur "
+           "both at once if the user wants only TCP or only UDP scanning.\n");
+    printf("    -w 3000/--wait 3000, is the timeout in milliseconds to wait for a response for a single port scan. "
+           "This parameter is optional, in its absence the value 5000 (i.e., five seconds) is used.\n");
+    printf("    hostname/ip-address, which either is hostname (e.g., merlin.fit.vutbr.cz) or IPv4/IPv6 address of "
+           "scanned device.\n");
+    printf("    All arguments can be in any order.\n");
+}
 
 pcap_if_t *getNetworkInterfaces()
 {
@@ -291,6 +313,7 @@ typedef struct Options
     int tcp_port_count;
     int timeout;
     char *target;
+    bool printHelp;
     TargetType target_type;
 } Options;
 
@@ -312,6 +335,19 @@ TargetType determineTargetType(Options opts)
     return TARGET_UNKNOWN;
 }
 
+void freeOptions(Options opts)
+{
+    if (opts.udp_ports)
+    {
+        free(opts.udp_ports);
+    }
+
+    if (opts.tcp_ports)
+    {
+        free(opts.tcp_ports);
+    }
+}
+
 Options parse_options(int argc, char **argv)
 {
     if (argc == 1)
@@ -323,21 +359,23 @@ Options parse_options(int argc, char **argv)
     Options opts = {.interface = NULL, .udp_ports = NULL, .tcp_ports = NULL, .timeout = 5000, .target = NULL};
 
     int opt;
-    const char *short_options = "i::u:t:w:";
-    static struct option long_options[] = {{"interface", optional_argument, 0, 'i'},
-                                           {"pu", required_argument, 0, 'u'},
-                                           {"pt", required_argument, 0, 't'},
-                                           {"timeout", required_argument, 0, 'w'},
-                                           {0, 0, 0, 0}};
+    const char *short_options = "hi::u:t:w:";
+    static struct option long_options[] = {
+        {"help", no_argument, 0, 'h'},     {"interface", optional_argument, 0, 'i'}, {"pu", required_argument, 0, 'u'},
+        {"pt", required_argument, 0, 't'}, {"timeout", required_argument, 0, 'w'},   {0, 0, 0, 0}};
 
     while ((opt = getopt_long(argc, argv, short_options, long_options, NULL)) != -1)
     {
         switch (opt)
         {
+        case 'h':
+            opts.printHelp = true;
+            break;
         case 'i':
             if (opts.interface != NULL)
             {
                 fprintf(stderr, RED "[Error] " RES "Interface is already specified.\n");
+                freeOptions(opts);
                 exit(EXIT_FAILURE);
             }
 
@@ -358,6 +396,7 @@ Options parse_options(int argc, char **argv)
             if (!isInterfaceValid(opts.interface))
             {
                 fprintf(stderr, RED "[Error] " RES "Interface is not valid\n");
+                freeOptions(opts);
                 exit(EXIT_FAILURE);
             }
             break;
@@ -365,6 +404,7 @@ Options parse_options(int argc, char **argv)
             if (opts.udp_ports != NULL)
             {
                 fprintf(stderr, RED "[Error] " RES "UDP port-ranges are already specified.\n");
+                freeOptions(opts);
                 exit(EXIT_FAILURE);
             }
 
@@ -389,6 +429,7 @@ Options parse_options(int argc, char **argv)
             else
             {
                 fprintf(stderr, "[Error] Invalid UDP port format: %s\n", optarg);
+                freeOptions(opts);
                 exit(EXIT_FAILURE);
             }
 
@@ -396,6 +437,7 @@ Options parse_options(int argc, char **argv)
             if (!opts.udp_ports)
             {
                 fprintf(stderr, "[Error] Memory allocation failed\n");
+                freeOptions(opts);
                 exit(EXIT_FAILURE);
             }
             memcpy(opts.udp_ports, uports, ucount * sizeof(int));
@@ -405,6 +447,7 @@ Options parse_options(int argc, char **argv)
             if (opts.tcp_ports != NULL)
             {
                 fprintf(stderr, RED "[Error] " RES "TCP port-ranges are already specified.\n");
+                freeOptions(opts);
                 exit(EXIT_FAILURE);
             }
 
@@ -429,6 +472,7 @@ Options parse_options(int argc, char **argv)
             else
             {
                 fprintf(stderr, "[Error] Invalid TCP port format: %s\n", optarg);
+                freeOptions(opts);
                 exit(EXIT_FAILURE);
             }
 
@@ -436,6 +480,7 @@ Options parse_options(int argc, char **argv)
             if (!opts.tcp_ports)
             {
                 fprintf(stderr, "[Error] Memory allocation failed\n");
+                freeOptions(opts);
                 exit(EXIT_FAILURE);
             }
             memcpy(opts.tcp_ports, tports, tcount * sizeof(int));
@@ -445,6 +490,7 @@ Options parse_options(int argc, char **argv)
             if (!regmatch("^[1-9][0-9]*$", optarg))
             {
                 fprintf(stderr, RED "[Error] " RES "Invalid timeout value.\n");
+                freeOptions(opts);
                 exit(EXIT_FAILURE);
             }
             opts.timeout = atoi(optarg);
@@ -455,33 +501,51 @@ Options parse_options(int argc, char **argv)
         }
         default:
             fprintf(stderr, RED "[Error] " RES "Failed unexpectedly.\n");
+            freeOptions(opts);
             exit(EXIT_FAILURE);
         }
     }
 
-    if (optind != argc - 1)
+    if (optind != argc - 1 && !opts.printHelp)
     {
         fprintf(stderr, RED "[Error] " RES "Exactly one domain-name or IP-address must be provided.\n");
+        freeOptions(opts);
         exit(EXIT_FAILURE);
     }
 
     opts.target = argv[optind];
+
+    if (opts.printHelp)
+    {
+        printHelpMessage();
+        if (opts.interface || opts.udp_ports || opts.tcp_ports || opts.timeout != 5000 || opts.target)
+        {
+            fprintf(stderr, RED "[Error] " RES "Invalid arguments for help.\n");
+            freeOptions(opts);
+            exit(EXIT_FAILURE);
+        }
+        exit(EXIT_SUCCESS);
+    }
+
     opts.target_type = determineTargetType(opts);
     if (opts.target_type == TARGET_UNKNOWN)
     {
         fprintf(stderr, RED "[Error] " RES "%s is not a valid target address.\n", opts.target);
+        freeOptions(opts);
         exit(EXIT_FAILURE);
     }
 
     if (opts.interface == NULL)
     {
         fprintf(stderr, RED "[Error] " RES "Exactly one interface has to be specified.\n");
+        freeOptions(opts);
         exit(EXIT_FAILURE);
     }
 
     if (opts.tcp_ports == NULL && opts.udp_ports == NULL)
     {
         fprintf(stderr, RED "[Error] " RES "TCP or UDP port range has to be specified.\n");
+        freeOptions(opts);
         exit(EXIT_FAILURE);
     }
 
@@ -884,7 +948,6 @@ void tcpScanner(Options opts, int port)
         if (sendto(raw_socket, segment, sizeof(struct ip6_hdr) + sizeof(struct tcphdr), 0,
                    (struct sockaddr *)&destination_socket_address, sizeof(destination_socket_address)) < 0)
         {
-            fprintf(stderr, "%s\n", opts.target);
             fprintf(stderr, RED "[Error] " RES "Sending SYN packet failed.\n");
             close(raw_socket);
             exit(EXIT_FAILURE);
@@ -1077,7 +1140,7 @@ void udpScanner(Options opts, int port)
             char buffer[65536];
 
             if (recvfrom(response_socket, buffer, sizeof(buffer), 0, (struct sockaddr *)&socket_address,
-                                        &socket_address_length) < 0)
+                         &socket_address_length) < 0)
             {
                 fprintf(stderr, RED "[Error] " RES "Unable to receive packets.\n");
                 close(response_socket);
@@ -1168,7 +1231,7 @@ void udpScanner(Options opts, int port)
         if (sendto(raw_socket, datagram, sizeof(struct ip6_hdr) + sizeof(struct udphdr), 0,
                    (struct sockaddr *)&destination_socket_address, sizeof(destination_socket_address)) < 0)
         {
-            perror("[Error] Sending UDP packet failed");
+            fprintf(stderr, RED "[Error] " RES "Sending UDP packet failed.\n");
             close(raw_socket);
             exit(EXIT_FAILURE);
         }
@@ -1205,7 +1268,7 @@ void udpScanner(Options opts, int port)
             char buffer[65536];
 
             if (recvfrom(response_socket, buffer, sizeof(buffer), 0, (struct sockaddr *)&socket_address,
-                                        &socket_address_length) < 0)
+                         &socket_address_length) < 0)
             {
                 fprintf(stderr, RED "[Error] " RES "Unable to receive packets.\n");
                 close(response_socket);
@@ -1247,7 +1310,7 @@ int main(int argc, char **argv)
     {
         for (int i = 0; i < opts.udp_port_count && !is_program_interrupted; i++)
         {
-            printf("udp %d\n", opts.udp_ports[i]);
+            // fprintf(stderr, "udp %d\n", opts.udp_ports[i]);
             udpScanner(opts, opts.udp_ports[i]);
         }
         free(opts.udp_ports);
@@ -1257,7 +1320,7 @@ int main(int argc, char **argv)
     {
         for (int i = 0; i < opts.tcp_port_count && !is_program_interrupted; i++)
         {
-            printf("tcp %d\n", opts.tcp_ports[i]);
+            // fprintf(stderr, "tcp %d\n", opts.tcp_ports[i]);
             tcpScanner(opts, opts.tcp_ports[i]);
         }
         free(opts.tcp_ports);
