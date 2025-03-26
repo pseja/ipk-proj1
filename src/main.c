@@ -16,6 +16,7 @@ typedef uint8_t u_char;
 #include <pcap.h>
 
 #include <netdb.h>
+#include <netinet/icmp6.h>
 #include <netinet/in.h>
 #include <netinet/ip.h>
 #include <netinet/ip6.h>
@@ -733,16 +734,12 @@ void tcpScanner(Options opts, int port)
             exit(EXIT_FAILURE);
         }
 
+        close(raw_socket);
+
         fprintf(stderr, "Successfully sent SYN packet to %s port %d\n", opts.target, port);
 
         // Creating a socket for the response
-        int response_socket = socket(AF_INET, SOCK_RAW, IPPROTO_TCP);
-        if (response_socket < 0)
-        {
-            fprintf(stderr, RED "[Error] " RES "Creating a socket failed, try running with sudo.\n");
-            close(raw_socket);
-            exit(EXIT_FAILURE);
-        }
+        int response_socket = createRawSocket(AF_INET, IPPROTO_TCP);
 
         // Timeout for receiving the packet
         struct timeval tv = {.tv_sec = opts.timeout / 1000, .tv_usec = (opts.timeout % 1000) * 1000};
@@ -756,7 +753,6 @@ void tcpScanner(Options opts, int port)
         if (ret == -1)
         {
             fprintf(stderr, RED "[Error] " RES "Select failed.\n");
-            close(raw_socket);
             close(response_socket);
             exit(EXIT_FAILURE);
         }
@@ -775,7 +771,6 @@ void tcpScanner(Options opts, int port)
                          (socklen_t *)&socket_address_size) < 0)
             {
                 fprintf(stderr, RED "[Error] " RES "Unable to receive packets.\n");
-                close(raw_socket);
                 close(response_socket);
                 exit(EXIT_FAILURE);
             }
@@ -804,7 +799,6 @@ void tcpScanner(Options opts, int port)
         }
 
         close(response_socket);
-        close(raw_socket);
     }
     else if (opts.target_type == TARGET_IPV6)
     {
@@ -895,16 +889,12 @@ void tcpScanner(Options opts, int port)
             exit(EXIT_FAILURE);
         }
 
+        close(raw_socket);
+
         fprintf(stderr, "Successfully sent SYN packet to %s port %d\n", opts.target, port);
 
         // Creating a socket for the response
-        int response_socket = socket(AF_INET6, SOCK_RAW, IPPROTO_TCP);
-        if (response_socket < 0)
-        {
-            fprintf(stderr, RED "[Error] " RES "Creating a response socket failed, try running with sudo.\n");
-            close(raw_socket);
-            exit(EXIT_FAILURE);
-        }
+        int response_socket = createRawSocket(AF_INET6, IPPROTO_TCP);
 
         // Set timeout for receiving
         struct timeval tv = {.tv_sec = opts.timeout / 1000, .tv_usec = (opts.timeout % 1000) * 1000};
@@ -918,7 +908,6 @@ void tcpScanner(Options opts, int port)
         if (ret == -1)
         {
             fprintf(stderr, RED "[Error] " RES "Select failed.\n");
-            close(raw_socket);
             close(response_socket);
             exit(EXIT_FAILURE);
         }
@@ -926,7 +915,6 @@ void tcpScanner(Options opts, int port)
         else if (ret == 0)
         {
             // Timeout, no data received
-            fprintf(stderr, "timeoutv6\n");
             printf("%s %d tcp filtered\n", opts.target, port);
         }
         else
@@ -935,11 +923,10 @@ void tcpScanner(Options opts, int port)
             int socket_address_size = sizeof(socket_address);
             unsigned char buffer[65536];
 
-            if (recvfrom(response_socket, buffer, 65536, 0, (struct sockaddr *)&socket_address,
+            if (recvfrom(response_socket, buffer, sizeof(buffer), 0, (struct sockaddr *)&socket_address,
                          (socklen_t *)&socket_address_size) < 0)
             {
                 fprintf(stderr, RED "[Error] " RES "Unable to receive packets.\n");
-                close(raw_socket);
                 close(response_socket);
                 exit(EXIT_FAILURE);
             }
@@ -963,7 +950,6 @@ void tcpScanner(Options opts, int port)
         }
 
         close(response_socket);
-        close(raw_socket);
     }
     else
     {
@@ -1058,15 +1044,11 @@ void udpScanner(Options opts, int port)
             exit(EXIT_FAILURE);
         }
 
+        close(raw_socket);
+
         fprintf(stderr, "Successfully sent UDP packet to %s port %d\n", opts.target, port);
 
-        int response_socket = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
-        if (response_socket < 0)
-        {
-            fprintf(stderr, RED "[Error] " RES "Creating a socket failed, try running with sudo.\n");
-            close(raw_socket);
-            exit(EXIT_FAILURE);
-        }
+        int response_socket = createRawSocket(AF_INET, IPPROTO_ICMP);
 
         // Timeout for receiving the packet
         struct timeval tv = {.tv_sec = opts.timeout / 1000, .tv_usec = (opts.timeout % 1000) * 1000};
@@ -1080,7 +1062,6 @@ void udpScanner(Options opts, int port)
         if (ret == -1)
         {
             fprintf(stderr, RED "[Error] " RES "Select failed.\n");
-            close(raw_socket);
             close(response_socket);
             exit(EXIT_FAILURE);
         }
@@ -1099,7 +1080,6 @@ void udpScanner(Options opts, int port)
             if (recv_len < 0)
             {
                 fprintf(stderr, RED "[Error] " RES "Unable to receive packets.\n");
-                close(raw_socket);
                 close(response_socket);
                 exit(EXIT_FAILURE);
             }
@@ -1130,7 +1110,6 @@ void udpScanner(Options opts, int port)
             }
         }
 
-        close(raw_socket);
         close(response_socket);
     }
     else if (opts.target_type == TARGET_IPV6)
@@ -1156,7 +1135,7 @@ int main(int argc, char **argv)
 
     if (opts.udp_ports)
     {
-        for (int i = 0; i < opts.udp_port_count; i++)
+        for (int i = 0; i < opts.udp_port_count && !is_program_interrupted; i++)
         {
             printf("udp %d\n", opts.udp_ports[i]);
             udpScanner(opts, opts.udp_ports[i]);
@@ -1166,7 +1145,7 @@ int main(int argc, char **argv)
 
     if (opts.tcp_ports)
     {
-        for (int i = 0; i < opts.tcp_port_count; i++)
+        for (int i = 0; i < opts.tcp_port_count && !is_program_interrupted; i++)
         {
             printf("tcp %d\n", opts.tcp_ports[i]);
             tcpScanner(opts, opts.tcp_ports[i]);
