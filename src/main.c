@@ -222,12 +222,12 @@ int isCommaSeparatedList(const char *input, int *ports, int *count)
         return 0;
     }
 
-    char buffer[256];
+    char buffer[65636];
     strncpy(buffer, input, sizeof(buffer) - 1);
     buffer[sizeof(buffer) - 1] = '\0';
 
     char *token = strtok(buffer, ",");
-    int uports[256], temp_count = 0;
+    int temp_ports[65536], temp_count = 0;
 
     while (token)
     {
@@ -236,11 +236,11 @@ int isCommaSeparatedList(const char *input, int *ports, int *count)
         {
             return 0;
         }
-        uports[temp_count++] = port;
+        temp_ports[temp_count++] = port;
         token = strtok(NULL, ",");
     }
 
-    memcpy(ports, uports, temp_count * sizeof(int));
+    memcpy(ports, temp_ports, temp_count * sizeof(int));
     *count = temp_count;
 
     return 1;
@@ -428,7 +428,7 @@ Options parse_options(int argc, char **argv)
             }
             else
             {
-                fprintf(stderr, "[Error] Invalid UDP port format: %s\n", optarg);
+                fprintf(stderr, RED "[Error] " RES "Invalid UDP port format: %s\n", optarg);
                 freeOptions(opts);
                 exit(EXIT_FAILURE);
             }
@@ -436,7 +436,7 @@ Options parse_options(int argc, char **argv)
             opts.udp_ports = malloc(ucount * sizeof(int));
             if (!opts.udp_ports)
             {
-                fprintf(stderr, "[Error] Memory allocation failed\n");
+                fprintf(stderr, RED "[Error] " RES "Memory allocation failed\n");
                 freeOptions(opts);
                 exit(EXIT_FAILURE);
             }
@@ -460,7 +460,7 @@ Options parse_options(int argc, char **argv)
             }
             else if (isCommaSeparatedList(optarg, tports, &tcount))
             {
-                // Ports already stored in uports[]
+                // Ports already stored in tports[]
             }
             else if (isValidRange(optarg, &tstart, &tend))
             {
@@ -471,7 +471,7 @@ Options parse_options(int argc, char **argv)
             }
             else
             {
-                fprintf(stderr, "[Error] Invalid TCP port format: %s\n", optarg);
+                fprintf(stderr, RED "[Error] " RES "Invalid TCP port format: %s\n", optarg);
                 freeOptions(opts);
                 exit(EXIT_FAILURE);
             }
@@ -479,14 +479,14 @@ Options parse_options(int argc, char **argv)
             opts.tcp_ports = malloc(tcount * sizeof(int));
             if (!opts.tcp_ports)
             {
-                fprintf(stderr, "[Error] Memory allocation failed\n");
+                fprintf(stderr, RED "[Error] " RES "Memory allocation failed\n");
                 freeOptions(opts);
                 exit(EXIT_FAILURE);
             }
             memcpy(opts.tcp_ports, tports, tcount * sizeof(int));
             opts.tcp_port_count = tcount;
             break;
-        case 'w': {
+        case 'w':
             if (!regmatch("^[1-9][0-9]*$", optarg))
             {
                 fprintf(stderr, RED "[Error] " RES "Invalid timeout value.\n");
@@ -495,10 +495,8 @@ Options parse_options(int argc, char **argv)
             }
             opts.timeout = atoi(optarg);
             break;
-        }
-        case '?': {
+        case '?':
             exit(EXIT_FAILURE);
-        }
         default:
             fprintf(stderr, RED "[Error] " RES "Failed unexpectedly.\n");
             freeOptions(opts);
@@ -604,7 +602,7 @@ int getInterfaceAddress(const char *interface_name, int family, char *address, s
 
     if (!found)
     {
-        fprintf(stderr, "Interface %s with family %s not found.\n", interface_name,
+        fprintf(stderr, RED "[Error] " RES "Interface %s with family %s not found.\n", interface_name,
                 (family == AF_INET) ? "IPv4" : "IPv6");
         return -1;
     }
@@ -612,51 +610,24 @@ int getInterfaceAddress(const char *interface_name, int family, char *address, s
     return 0;
 }
 
-void getTargetHostname(Options *opts, char *hostname)
+struct addrinfo *getAddrinfoStruct(Options *opts)
 {
-    int status;
-    struct addrinfo hints, *res, *p;
-    char ipstr[INET6_ADDRSTRLEN];
+    struct addrinfo hints;
 
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
 
-    if ((status = getaddrinfo(opts->target, NULL, &hints, &res)) != 0)
+    int result;
+    struct addrinfo *addresses;
+    if ((result = getaddrinfo(opts->target, NULL, &hints, &addresses)) != 0)
     {
-        fprintf(stderr, RED "[Error] " RES "getaddrinfo: %s\n", gai_strerror(status));
+        fprintf(stderr, RED "[Error] " RES "Couldn't get the address info of %s\n%s\n", opts->target,
+                gai_strerror(result));
         exit(EXIT_FAILURE);
     }
 
-    for (p = res; p != NULL; p = p->ai_next)
-    {
-        void *addr;
-
-        if (p->ai_family == AF_INET)
-        {
-            struct sockaddr_in *ipv4 = (struct sockaddr_in *)p->ai_addr;
-            addr = &(ipv4->sin_addr);
-            opts->target_type = TARGET_IPV4;
-        }
-        else if (p->ai_family == AF_INET6)
-        {
-            struct sockaddr_in6 *ipv6 = (struct sockaddr_in6 *)p->ai_addr;
-            addr = &(ipv6->sin6_addr);
-            opts->target_type = TARGET_IPV6;
-        }
-        else
-        {
-            fprintf(stderr, "[Error] Unknown target type.\n");
-            freeaddrinfo(res);
-            exit(EXIT_FAILURE);
-        }
-
-        inet_ntop(p->ai_family, addr, ipstr, sizeof(ipstr));
-        strcpy(hostname, ipstr);
-        break;
-    }
-
-    freeaddrinfo(res);
+    return addresses;
 }
 
 // source: https://datatracker.ietf.org/doc/html/rfc1071#section-4.1
@@ -687,28 +658,15 @@ unsigned short checkSum(unsigned short *segment, int packet_size)
     return result;
 }
 
-int createRawSocket(int family, int protocol)
-{
-    int raw_socket = socket(family, SOCK_RAW, protocol);
-    if (raw_socket < 0)
-    {
-        fprintf(stderr, RED "[Error] " RES "Creating an %s socket failed, try running with sudo.\n",
-                family == AF_INET ? "IPv4" : "IPv6");
-        exit(EXIT_FAILURE);
-    }
-
-    return raw_socket;
-}
-
 // packet size in bytes
-#define PACKET_SIZE 8192
+#define PACKET_SIZE 4096
 #define SOURCE_PORT 42069
 
 void tcpScanner(Options opts, int port)
 {
     if (opts.target_type == TARGET_IPV4)
     {
-        char segment[4096]; // sizeof(struct iphdr) + sizeof(struct tcphdr)
+        char segment[PACKET_SIZE]; // sizeof(struct iphdr) + sizeof(struct tcphdr)
         memset(segment, 0, sizeof(segment));
 
         // IPv4 header and TCP header
@@ -720,8 +678,6 @@ void tcpScanner(Options opts, int port)
 
         struct in_addr server_ip;
         server_ip.s_addr = inet_addr(opts.target);
-
-        fprintf(stderr, "interface %s ipv4 address %s\n", opts.interface, ip_addr);
 
         // ip header based on RFC 791
         // source: https://datatracker.ietf.org/doc/html/rfc791
@@ -760,8 +716,6 @@ void tcpScanner(Options opts, int port)
         tcp_header->check = 0;
         tcp_header->urg_ptr = 0;
 
-        fprintf(stderr, "\nsending now to %d...\n", port);
-
         struct pseudo_header
         {
             u_int32_t source_address;
@@ -787,24 +741,33 @@ void tcpScanner(Options opts, int port)
         destination_socket_address.sin_port = htons(port);
         destination_socket_address.sin_addr.s_addr = server_ip.s_addr;
 
-        int raw_socket = createRawSocket(AF_INET, IPPROTO_RAW);
+        // Creating a socket for sending
+        int raw_socket = socket(AF_INET, SOCK_RAW, IPPROTO_RAW);
+        if (raw_socket < 0)
+        {
+            fprintf(stderr, RED "[Error] " RES "Creating an IPv4 socket failed, try running with sudo.\n");
+            exit(EXIT_FAILURE);
+        }
+
+        // Creating a socket for the response
+        int response_socket = socket(AF_INET, SOCK_RAW, IPPROTO_TCP);
+        if (response_socket < 0)
+        {
+            fprintf(stderr, RED "[Error] " RES "Creating an IPv4 socket failed, try running with sudo.\n");
+            close(raw_socket);
+            exit(EXIT_FAILURE);
+        }
 
         // Send the packet
         if (sendto(raw_socket, segment, sizeof(struct iphdr) + sizeof(struct tcphdr), 0,
                    (struct sockaddr *)&destination_socket_address, sizeof(destination_socket_address)) < 0)
         {
-            fprintf(stderr, "%s\n", opts.target);
             fprintf(stderr, RED "[Error] " RES "Sending SYN packet failed.\n");
             close(raw_socket);
             exit(EXIT_FAILURE);
         }
 
         close(raw_socket);
-
-        fprintf(stderr, "Successfully sent SYN packet to %s port %d\n", opts.target, port);
-
-        // Creating a socket for the response
-        int response_socket = createRawSocket(AF_INET, IPPROTO_TCP);
 
         // Timeout for receiving the packet
         struct timeval tv = {.tv_sec = opts.timeout / 1000, .tv_usec = (opts.timeout % 1000) * 1000};
@@ -868,7 +831,7 @@ void tcpScanner(Options opts, int port)
     else if (opts.target_type == TARGET_IPV6)
     {
         // Prepare the segment buffer
-        char segment[4096]; // sizeof(struct ip6_hdr + struct tcphdr)
+        char segment[PACKET_SIZE]; // sizeof(struct ip6_hdr + struct tcphdr)
         memset(segment, 0, sizeof(segment));
 
         // IPv6 header and TCP header
@@ -877,8 +840,6 @@ void tcpScanner(Options opts, int port)
 
         char ip_addr[INET6_ADDRSTRLEN];
         getInterfaceAddress(opts.interface, AF_INET6, ip_addr, sizeof(ip_addr));
-
-        fprintf(stderr, "interface %s ipv6 address %s\n", opts.interface, ip_addr);
 
         struct in6_addr destination_ip;
         inet_pton(AF_INET6, opts.target, &destination_ip);
@@ -912,8 +873,6 @@ void tcpScanner(Options opts, int port)
         tcp_header->check = 0;
         tcp_header->urg_ptr = 0;
 
-        fprintf(stderr, "\nsending now to %d...\n", port);
-
         // Pseudo-header for checksum calculation
         struct pseudo_header_v6
         {
@@ -925,11 +884,9 @@ void tcpScanner(Options opts, int port)
             struct tcphdr tcp;
         } psh;
 
-        psh.source_address = ip6_header->ip6_src;
-        psh.dest_address = ip6_header->ip6_dst;
-        psh.placeholder[0] = 0;
-        psh.placeholder[1] = 0;
-        psh.placeholder[2] = 0;
+        psh.source_address = source_ip;
+        psh.dest_address = destination_ip;
+        memset(psh.placeholder, 0, sizeof(psh.placeholder));
         psh.next_header = IPPROTO_TCP;
         psh.tcp_length = htonl(sizeof(struct tcphdr));
 
@@ -939,10 +896,26 @@ void tcpScanner(Options opts, int port)
         // Setup the destination address for sendto
         struct sockaddr_in6 destination_socket_address;
         destination_socket_address.sin6_family = AF_INET6;
-        destination_socket_address.sin6_port = htons(port);
+        destination_socket_address.sin6_port = 0; // this has to be zero!!! when this was set to htons(port) it wasn't
+                                                  // allowing ports larger than 255 and sento was failing
         destination_socket_address.sin6_addr = destination_ip;
 
-        int raw_socket = createRawSocket(AF_INET6, IPPROTO_RAW);
+        // Creating a socket for sending
+        int raw_socket = socket(AF_INET6, SOCK_RAW, IPPROTO_RAW);
+        if (raw_socket < 0)
+        {
+            fprintf(stderr, RED "[Error] " RES "Creating an IPv6 socket failed, try running with sudo.\n");
+            exit(EXIT_FAILURE);
+        }
+
+        // Creating a socket for the response
+        int response_socket = socket(AF_INET6, SOCK_RAW, IPPROTO_TCP);
+        if (response_socket < 0)
+        {
+            fprintf(stderr, RED "[Error] " RES "Creating an IPv6 socket failed, try running with sudo.\n");
+            close(raw_socket);
+            exit(EXIT_FAILURE);
+        }
 
         // Send the packet
         if (sendto(raw_socket, segment, sizeof(struct ip6_hdr) + sizeof(struct tcphdr), 0,
@@ -954,11 +927,6 @@ void tcpScanner(Options opts, int port)
         }
 
         close(raw_socket);
-
-        fprintf(stderr, "Successfully sent SYN packet to %s port %d\n", opts.target, port);
-
-        // Creating a socket for the response
-        int response_socket = createRawSocket(AF_INET6, IPPROTO_TCP);
 
         // Set timeout for receiving
         struct timeval tv = {.tv_sec = opts.timeout / 1000, .tv_usec = (opts.timeout % 1000) * 1000};
@@ -1034,7 +1002,7 @@ void udpScanner(Options opts, int port)
 {
     if (opts.target_type == TARGET_IPV4)
     {
-        char datagram[4096];
+        char datagram[PACKET_SIZE];
         memset(datagram, 0, sizeof(datagram));
 
         struct iphdr *ip_header = (struct iphdr *)datagram;
@@ -1045,8 +1013,6 @@ void udpScanner(Options opts, int port)
 
         struct in_addr server_ip;
         server_ip.s_addr = inet_addr(opts.target);
-
-        fprintf(stderr, "interface %s ipv4 address %s\n", opts.interface, ip_addr);
 
         // ip header based on RFC 791
         // source: https://datatracker.ietf.org/doc/html/rfc791
@@ -1098,7 +1064,22 @@ void udpScanner(Options opts, int port)
         destination_socket_address.sin_port = htons(port);
         destination_socket_address.sin_addr.s_addr = server_ip.s_addr;
 
-        int raw_socket = createRawSocket(AF_INET, IPPROTO_RAW);
+        // Creating a socket for sending
+        int raw_socket = socket(AF_INET, SOCK_RAW, IPPROTO_RAW);
+        if (raw_socket < 0)
+        {
+            fprintf(stderr, RED "[Error] " RES "Creating an IPv4 socket failed, try running with sudo.\n");
+            exit(EXIT_FAILURE);
+        }
+
+        // Creating a socket for the response
+        int response_socket = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
+        if (response_socket < 0)
+        {
+            fprintf(stderr, RED "[Error] " RES "Creating an IPv6 socket failed, try running with sudo.\n");
+            close(raw_socket);
+            exit(EXIT_FAILURE);
+        }
 
         if (sendto(raw_socket, datagram, sizeof(struct iphdr) + sizeof(struct udphdr), 0,
                    (struct sockaddr *)&destination_socket_address, sizeof(destination_socket_address)) < 0)
@@ -1109,10 +1090,6 @@ void udpScanner(Options opts, int port)
         }
 
         close(raw_socket);
-
-        fprintf(stderr, "Successfully sent UDP packet to %s port %d\n", opts.target, port);
-
-        int response_socket = createRawSocket(AF_INET, IPPROTO_ICMP);
 
         // Timeout for receiving the packet
         struct timeval tv = {.tv_sec = opts.timeout / 1000, .tv_usec = (opts.timeout % 1000) * 1000};
@@ -1165,7 +1142,7 @@ void udpScanner(Options opts, int port)
     }
     else if (opts.target_type == TARGET_IPV6)
     {
-        char datagram[4096];
+        char datagram[PACKET_SIZE];
         memset(datagram, 0, sizeof(datagram));
 
         struct ip6_hdr *ip6_header = (struct ip6_hdr *)datagram;
@@ -1179,8 +1156,6 @@ void udpScanner(Options opts, int port)
 
         struct in6_addr source_ip;
         inet_pton(AF_INET6, ip_addr, &source_ip);
-
-        fprintf(stderr, "interface %s ipv6 address %s\n", opts.interface, ip_addr);
 
         // IPv6 header based on RFC 8200
         // source: https://www.rfc-editor.org/rfc/rfc8200#section-3
@@ -1207,11 +1182,10 @@ void udpScanner(Options opts, int port)
             uint8_t next_header;
             struct udphdr udp;
         } psh;
+
         psh.source_address = ip6_header->ip6_src;
         psh.dest_address = ip6_header->ip6_dst;
-        psh.placeholder[0] = 0;
-        psh.placeholder[1] = 0;
-        psh.placeholder[2] = 0;
+        memset(psh.placeholder, 0, sizeof(psh.placeholder));
         psh.next_header = IPPROTO_UDP;
         psh.udp_length = htonl(sizeof(struct udphdr));
 
@@ -1223,10 +1197,26 @@ void udpScanner(Options opts, int port)
         struct sockaddr_in6 destination_socket_address;
         // memset(&destination_socket_address, 0, sizeof(destination_socket_address));
         destination_socket_address.sin6_family = AF_INET6;
-        destination_socket_address.sin6_port = htons(port);
+        destination_socket_address.sin6_port = 0; // this has to be zero!!! when this was set to htons(port) it wasn't
+                                                  // allowing ports larger than 255 and sento was failing
         destination_socket_address.sin6_addr = server_ip;
 
-        int raw_socket = createRawSocket(AF_INET6, IPPROTO_RAW);
+        // Creating a socket for sending
+        int raw_socket = socket(AF_INET6, SOCK_RAW, IPPROTO_RAW);
+        if (raw_socket < 0)
+        {
+            fprintf(stderr, RED "[Error] " RES "Creating an IPv6 socket failed, try running with sudo.\n");
+            exit(EXIT_FAILURE);
+        }
+
+        // Creating a socket for the response
+        int response_socket = socket(AF_INET6, SOCK_RAW, IPPROTO_ICMPV6);
+        if (response_socket < 0)
+        {
+            fprintf(stderr, RED "[Error] " RES "Creating an IPv6 socket failed, try running with sudo.\n");
+            close(raw_socket);
+            exit(EXIT_FAILURE);
+        }
 
         if (sendto(raw_socket, datagram, sizeof(struct ip6_hdr) + sizeof(struct udphdr), 0,
                    (struct sockaddr *)&destination_socket_address, sizeof(destination_socket_address)) < 0)
@@ -1237,10 +1227,6 @@ void udpScanner(Options opts, int port)
         }
 
         close(raw_socket);
-
-        fprintf(stderr, "Successfully sent UDP packet to %s port %d\n", opts.target, port);
-
-        int response_socket = createRawSocket(AF_INET6, IPPROTO_ICMPV6);
 
         // Timeout for receiving the packet
         struct timeval tv = {.tv_sec = opts.timeout / 1000, .tv_usec = (opts.timeout % 1000) * 1000};
@@ -1296,35 +1282,66 @@ void udpScanner(Options opts, int port)
     }
 }
 
+void scanPortsForEachAddress(struct addrinfo *addresses, Options opts)
+{
+    struct addrinfo *address;
+    for (address = addresses; address != NULL; address = address->ai_next)
+    {
+        void *addr;
+
+        if (address->ai_family == AF_INET)
+        {
+            struct sockaddr_in *ipv4 = (struct sockaddr_in *)address->ai_addr;
+            addr = &(ipv4->sin_addr);
+            opts.target_type = TARGET_IPV4;
+        }
+        else if (address->ai_family == AF_INET6)
+        {
+            struct sockaddr_in6 *ipv6 = (struct sockaddr_in6 *)address->ai_addr;
+            addr = &(ipv6->sin6_addr);
+            opts.target_type = TARGET_IPV6;
+        }
+        else
+        {
+            fprintf(stderr, RED "[Error] " RES "Unknown target type.\n");
+            freeaddrinfo(addresses);
+            exit(EXIT_FAILURE);
+        }
+
+        char ipstr[INET6_ADDRSTRLEN];
+        inet_ntop(address->ai_family, addr, ipstr, sizeof(ipstr));
+        opts.target = ipstr;
+
+        if (opts.udp_ports)
+        {
+            for (int i = 0; i < opts.udp_port_count && !is_program_interrupted; i++)
+            {
+                udpScanner(opts, opts.udp_ports[i]);
+            }
+        }
+
+        if (opts.tcp_ports)
+        {
+            for (int i = 0; i < opts.tcp_port_count && !is_program_interrupted; i++)
+            {
+                tcpScanner(opts, opts.tcp_ports[i]);
+            }
+        }
+    }
+
+    freeOptions(opts);
+    freeaddrinfo(addresses);
+}
+
 int main(int argc, char **argv)
 {
     Options opts = parse_options(argc, argv);
 
     signal(SIGINT, exitProgram);
 
-    char hostname[INET6_ADDRSTRLEN];
-    getTargetHostname(&opts, hostname);
-    opts.target = hostname;
+    struct addrinfo *addrinfo_struct = getAddrinfoStruct(&opts);
 
-    if (opts.udp_ports)
-    {
-        for (int i = 0; i < opts.udp_port_count && !is_program_interrupted; i++)
-        {
-            // fprintf(stderr, "udp %d\n", opts.udp_ports[i]);
-            udpScanner(opts, opts.udp_ports[i]);
-        }
-        free(opts.udp_ports);
-    }
-
-    if (opts.tcp_ports)
-    {
-        for (int i = 0; i < opts.tcp_port_count && !is_program_interrupted; i++)
-        {
-            // fprintf(stderr, "tcp %d\n", opts.tcp_ports[i]);
-            tcpScanner(opts, opts.tcp_ports[i]);
-        }
-        free(opts.tcp_ports);
-    }
+    scanPortsForEachAddress(addrinfo_struct, opts);
 
     return 0;
 }
