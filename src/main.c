@@ -1,3 +1,4 @@
+#include <cstdint>
 #define _GNU_SOURCE
 #include <getopt.h>
 #include <net/if.h>
@@ -1075,26 +1076,13 @@ void udpScanner(Options opts, int port)
             socklen_t socket_address_length = sizeof(socket_address);
             char buffer[65536];
 
-            ssize_t recv_len = recvfrom(response_socket, buffer, sizeof(buffer), 0, (struct sockaddr *)&socket_address,
-                                        &socket_address_length);
-            if (recv_len < 0)
+            if (recvfrom(response_socket, buffer, sizeof(buffer), 0, (struct sockaddr *)&socket_address,
+                                        &socket_address_length) < 0)
             {
                 fprintf(stderr, RED "[Error] " RES "Unable to receive packets.\n");
                 close(response_socket);
                 exit(EXIT_FAILURE);
             }
-
-            // Debug: Print the raw buffer
-            printf("Received buffer (hex):\n");
-            for (ssize_t i = 0; i < recv_len; i++)
-            {
-                printf("%02x ", (unsigned char)buffer[i]);
-                if ((i + 1) % 16 == 0)
-                {
-                    printf("\n");
-                }
-            }
-            printf("\n");
 
             struct iphdr *ip_head = (struct iphdr *)buffer;
             unsigned short ip_head_len = ip_head->ihl * 4;
@@ -1114,7 +1102,129 @@ void udpScanner(Options opts, int port)
     }
     else if (opts.target_type == TARGET_IPV6)
     {
-        fprintf(stderr, RED "[Error] " RES "IPv6 UDP scanning is not implemented yet.\n");
+        char datagram[4096];
+        memset(datagram, 0, sizeof(datagram));
+
+        struct ip6_hdr *ip6_header = (struct ip6_hdr *)datagram;
+        struct udphdr *udp_header = (struct udphdr *)(datagram + sizeof(struct ip6_hdr));
+
+        char ip_addr[INET6_ADDRSTRLEN];
+        getInterfaceAddress(opts.interface, AF_INET6, ip_addr, sizeof(ip_addr));
+
+        struct in6_addr server_ip;
+        inet_pton(AF_INET6, opts.target, &server_ip);
+
+        struct in6_addr source_ip;
+        inet_pton(AF_INET6, ip_addr, &source_ip);
+
+        fprintf(stderr, "interface %s ipv6 address %s\n", opts.interface, ip_addr);
+
+        // IPv6 header based on RFC 8200
+        // source: https://www.rfc-editor.org/rfc/rfc8200#section-3
+        ip6_header->ip6_flow = htonl((6 << 28) | (0 << 20) | 0); // Version, Traffic Class, Flow Label
+        ip6_header->ip6_plen = htons(sizeof(struct udphdr));     // Payload length
+        ip6_header->ip6_nxt = IPPROTO_UDP;                       // Next header
+        ip6_header->ip6_hops = 255;                              // Hop limit
+        ip6_header->ip6_dst = server_ip;                         // Destination address
+        ip6_header->ip6_src = source_ip;                         // Source address
+
+        // UDP header based on RFC 768
+        // source: https://datatracker.ietf.org/doc/html/rfc768
+        udp_header->source = htons(SOURCE_PORT);
+        udp_header->dest = htons(port);
+        udp_header->len = htons(sizeof(struct udphdr));
+        udp_header->check = 0;
+
+        struct pseudo_header_v6
+        {
+            struct in6_addr source_address;
+            struct in6_addr dest_address;
+            uint32_t udp_length;
+            uint8_t placeholder[3];
+            uint8_t next_header;
+            struct udphdr udp;
+        } psh;
+        psh.source_address = ip6_header->ip6_src;
+        psh.dest_address = ip6_header->ip6_dst;
+        psh.placeholder[0] = 0;
+        psh.placeholder[1] = 0;
+        psh.placeholder[2] = 0;
+        psh.next_header = IPPROTO_UDP;
+        psh.udp_length = htonl(sizeof(struct udphdr));
+
+        // Copy the UDP header into the pseudo header
+        memcpy(&psh.udp, udp_header, sizeof(struct udphdr));
+        udp_header->check = checkSum((unsigned short *)&psh, sizeof(struct pseudo_header_v6));
+
+        // Setup the destination address for sendto
+        struct sockaddr_in6 destination_socket_address;
+        // memset(&destination_socket_address, 0, sizeof(destination_socket_address));
+        destination_socket_address.sin6_family = AF_INET6;
+        destination_socket_address.sin6_port = htons(port);
+        destination_socket_address.sin6_addr = server_ip;
+
+        int raw_socket = createRawSocket(AF_INET6, IPPROTO_RAW);
+
+        if (sendto(raw_socket, datagram, sizeof(struct ip6_hdr) + sizeof(struct udphdr), 0,
+                   (struct sockaddr *)&destination_socket_address, sizeof(destination_socket_address)) < 0)
+        {
+            perror("[Error] Sending UDP packet failed");
+            close(raw_socket);
+            exit(EXIT_FAILURE);
+        }
+
+        close(raw_socket);
+
+        fprintf(stderr, "Successfully sent UDP packet to %s port %d\n", opts.target, port);
+
+        int response_socket = createRawSocket(AF_INET6, IPPROTO_ICMPV6);
+
+        // Timeout for receiving the packet
+        struct timeval tv = {.tv_sec = opts.timeout / 1000, .tv_usec = (opts.timeout % 1000) * 1000};
+        fd_set readfds;
+        FD_ZERO(&readfds);
+        FD_SET(response_socket, &readfds);
+
+        // Using select for timeout
+        int ret = select(response_socket + 1, &readfds, NULL, NULL, &tv);
+        // Select failed
+        if (ret == -1)
+        {
+            fprintf(stderr, RED "[Error] " RES "Select failed.\n");
+            close(response_socket);
+            exit(EXIT_FAILURE);
+        }
+        else if (ret == 0)
+        {
+            printf("%s %d udp open\n", opts.target, port);
+        }
+        else
+        {
+            struct sockaddr_in6 socket_address;
+            socklen_t socket_address_length = sizeof(socket_address);
+            char buffer[65536];
+
+            if (recvfrom(response_socket, buffer, sizeof(buffer), 0, (struct sockaddr *)&socket_address,
+                                        &socket_address_length) < 0)
+            {
+                fprintf(stderr, RED "[Error] " RES "Unable to receive packets.\n");
+                close(response_socket);
+                exit(EXIT_FAILURE);
+            }
+
+            struct icmp6_hdr *icmp6_head = (struct icmp6_hdr *)(buffer);
+
+            if (icmp6_head->icmp6_type == 1 && icmp6_head->icmp6_code == 4)
+            {
+                printf("%s %d udp closed\n", opts.target, port);
+            }
+            else
+            {
+                printf("%s %d udp open\n", opts.target, port);
+            }
+        }
+
+        close(response_socket);
     }
     else
     {
