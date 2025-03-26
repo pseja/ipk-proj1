@@ -29,11 +29,7 @@ typedef uint8_t u_char;
 #include <signal.h>
 #include <sys/select.h>
 
-#define RED "\e[0;31m"
-#define YEL "\e[0;33m"
-#define BLK "\e[0;30m"
-#define RES "\e[0m"
-#define UWHT "\e[4;37m"
+#include "error.h"
 
 void printHelpMessage()
 {
@@ -65,7 +61,7 @@ pcap_if_t *getNetworkInterfaces()
 
     if (pcap_findalldevs(&interfaces, error_buffer) == -1 || interfaces == NULL)
     {
-        fprintf(stderr, RED "[Error] " RES "Finding interfaces failed.\n");
+        printError("Finding interfaces failed.\n");
         return NULL;
     }
 
@@ -189,7 +185,7 @@ int regmatch(const char *pattern, const char *input)
     int result = regcomp(&regex, pattern, REG_EXTENDED);
     if (result)
     {
-        fprintf(stderr, RED "[Error] " RES "Could not compile regex %s\n", pattern);
+        printError("Could not compile regex %s\n", pattern);
         return 0;
     }
 
@@ -374,7 +370,7 @@ Options parse_options(int argc, char **argv)
         case 'i':
             if (opts.interface != NULL)
             {
-                fprintf(stderr, RED "[Error] " RES "Interface is already specified.\n");
+                printError("Interface is already specified.\n");
                 freeOptions(opts);
                 exit(EXIT_FAILURE);
             }
@@ -395,7 +391,7 @@ Options parse_options(int argc, char **argv)
 
             if (!isInterfaceValid(opts.interface))
             {
-                fprintf(stderr, RED "[Error] " RES "Interface is not valid\n");
+                printError("Interface is not valid\n");
                 freeOptions(opts);
                 exit(EXIT_FAILURE);
             }
@@ -403,7 +399,7 @@ Options parse_options(int argc, char **argv)
         case 'u':
             if (opts.udp_ports != NULL)
             {
-                fprintf(stderr, RED "[Error] " RES "UDP port-ranges are already specified.\n");
+                printError("UDP port-ranges are already specified.\n");
                 freeOptions(opts);
                 exit(EXIT_FAILURE);
             }
@@ -428,7 +424,7 @@ Options parse_options(int argc, char **argv)
             }
             else
             {
-                fprintf(stderr, RED "[Error] " RES "Invalid UDP port format: %s\n", optarg);
+                printError("Invalid UDP port format: %s\n", optarg);
                 freeOptions(opts);
                 exit(EXIT_FAILURE);
             }
@@ -436,7 +432,7 @@ Options parse_options(int argc, char **argv)
             opts.udp_ports = malloc(ucount * sizeof(int));
             if (!opts.udp_ports)
             {
-                fprintf(stderr, RED "[Error] " RES "Memory allocation failed\n");
+                printError("Memory allocation failed\n");
                 freeOptions(opts);
                 exit(EXIT_FAILURE);
             }
@@ -446,7 +442,7 @@ Options parse_options(int argc, char **argv)
         case 't':
             if (opts.tcp_ports != NULL)
             {
-                fprintf(stderr, RED "[Error] " RES "TCP port-ranges are already specified.\n");
+                printError("TCP port-ranges are already specified.\n");
                 freeOptions(opts);
                 exit(EXIT_FAILURE);
             }
@@ -471,7 +467,7 @@ Options parse_options(int argc, char **argv)
             }
             else
             {
-                fprintf(stderr, RED "[Error] " RES "Invalid TCP port format: %s\n", optarg);
+                printError("Invalid TCP port format: %s\n", optarg);
                 freeOptions(opts);
                 exit(EXIT_FAILURE);
             }
@@ -479,7 +475,7 @@ Options parse_options(int argc, char **argv)
             opts.tcp_ports = malloc(tcount * sizeof(int));
             if (!opts.tcp_ports)
             {
-                fprintf(stderr, RED "[Error] " RES "Memory allocation failed\n");
+                printError("Memory allocation failed\n");
                 freeOptions(opts);
                 exit(EXIT_FAILURE);
             }
@@ -489,7 +485,7 @@ Options parse_options(int argc, char **argv)
         case 'w':
             if (!regmatch("^[1-9][0-9]*$", optarg))
             {
-                fprintf(stderr, RED "[Error] " RES "Invalid timeout value.\n");
+                printError("Invalid timeout value.\n");
                 freeOptions(opts);
                 exit(EXIT_FAILURE);
             }
@@ -498,7 +494,7 @@ Options parse_options(int argc, char **argv)
         case '?':
             exit(EXIT_FAILURE);
         default:
-            fprintf(stderr, RED "[Error] " RES "Failed unexpectedly.\n");
+            printError("Failed unexpectedly.\n");
             freeOptions(opts);
             exit(EXIT_FAILURE);
         }
@@ -506,7 +502,7 @@ Options parse_options(int argc, char **argv)
 
     if (optind != argc - 1 && !opts.printHelp)
     {
-        fprintf(stderr, RED "[Error] " RES "Exactly one domain-name or IP-address must be provided.\n");
+        printError("Exactly one domain-name or IP-address must be provided.\n");
         freeOptions(opts);
         exit(EXIT_FAILURE);
     }
@@ -518,7 +514,7 @@ Options parse_options(int argc, char **argv)
         printHelpMessage();
         if (opts.interface || opts.udp_ports || opts.tcp_ports || opts.timeout != 5000 || opts.target)
         {
-            fprintf(stderr, RED "[Error] " RES "Invalid arguments for help.\n");
+            printError("Invalid arguments for help.\n");
             freeOptions(opts);
             exit(EXIT_FAILURE);
         }
@@ -528,21 +524,21 @@ Options parse_options(int argc, char **argv)
     opts.target_type = determineTargetType(opts);
     if (opts.target_type == TARGET_UNKNOWN)
     {
-        fprintf(stderr, RED "[Error] " RES "%s is not a valid target address.\n", opts.target);
+        printError("%s is not a valid target address.\n", opts.target);
         freeOptions(opts);
         exit(EXIT_FAILURE);
     }
 
     if (opts.interface == NULL)
     {
-        fprintf(stderr, RED "[Error] " RES "Exactly one interface has to be specified.\n");
+        printError("Exactly one interface has to be specified.\n");
         freeOptions(opts);
         exit(EXIT_FAILURE);
     }
 
     if (opts.tcp_ports == NULL && opts.udp_ports == NULL)
     {
-        fprintf(stderr, RED "[Error] " RES "TCP or UDP port range has to be specified.\n");
+        printError("TCP or UDP port range has to be specified.\n");
         freeOptions(opts);
         exit(EXIT_FAILURE);
     }
@@ -602,7 +598,7 @@ int getInterfaceAddress(const char *interface_name, int family, char *address, s
 
     if (!found)
     {
-        fprintf(stderr, RED "[Error] " RES "Interface %s with family %s not found.\n", interface_name,
+        printError("Interface %s with family %s not found.\n", interface_name,
                 (family == AF_INET) ? "IPv4" : "IPv6");
         return -1;
     }
@@ -622,7 +618,7 @@ struct addrinfo *getAddrinfoStruct(Options *opts)
     struct addrinfo *addresses;
     if ((result = getaddrinfo(opts->target, NULL, &hints, &addresses)) != 0)
     {
-        fprintf(stderr, RED "[Error] " RES "Couldn't get the address info of %s\n%s\n", opts->target,
+        printError("Couldn't get the address info of %s\n%s\n", opts->target,
                 gai_strerror(result));
         exit(EXIT_FAILURE);
     }
@@ -745,7 +741,7 @@ void tcpScanner(Options opts, int port)
         int raw_socket = socket(AF_INET, SOCK_RAW, IPPROTO_RAW);
         if (raw_socket < 0)
         {
-            fprintf(stderr, RED "[Error] " RES "Creating an IPv4 socket failed, try running with sudo.\n");
+            printError("Creating an IPv4 socket failed, try running with sudo.\n");
             exit(EXIT_FAILURE);
         }
 
@@ -753,7 +749,7 @@ void tcpScanner(Options opts, int port)
         int response_socket = socket(AF_INET, SOCK_RAW, IPPROTO_TCP);
         if (response_socket < 0)
         {
-            fprintf(stderr, RED "[Error] " RES "Creating an IPv4 socket failed, try running with sudo.\n");
+            printError("Creating an IPv4 socket failed, try running with sudo.\n");
             close(raw_socket);
             exit(EXIT_FAILURE);
         }
@@ -762,7 +758,7 @@ void tcpScanner(Options opts, int port)
         if (sendto(raw_socket, segment, sizeof(struct iphdr) + sizeof(struct tcphdr), 0,
                    (struct sockaddr *)&destination_socket_address, sizeof(destination_socket_address)) < 0)
         {
-            fprintf(stderr, RED "[Error] " RES "Sending SYN packet failed.\n");
+            printError("Sending SYN packet failed.\n");
             close(raw_socket);
             exit(EXIT_FAILURE);
         }
@@ -780,7 +776,7 @@ void tcpScanner(Options opts, int port)
         // Select failed
         if (ret == -1)
         {
-            fprintf(stderr, RED "[Error] " RES "Select failed.\n");
+            printError("Select failed.\n");
             close(response_socket);
             exit(EXIT_FAILURE);
         }
@@ -798,7 +794,7 @@ void tcpScanner(Options opts, int port)
             if (recvfrom(response_socket, buffer, sizeof(buffer), 0, (struct sockaddr *)&socket_address,
                          (socklen_t *)&socket_address_size) < 0)
             {
-                fprintf(stderr, RED "[Error] " RES "Unable to receive packets.\n");
+                printError("Unable to receive packets.\n");
                 close(response_socket);
                 exit(EXIT_FAILURE);
             }
@@ -904,7 +900,7 @@ void tcpScanner(Options opts, int port)
         int raw_socket = socket(AF_INET6, SOCK_RAW, IPPROTO_RAW);
         if (raw_socket < 0)
         {
-            fprintf(stderr, RED "[Error] " RES "Creating an IPv6 socket failed, try running with sudo.\n");
+            printError("Creating an IPv6 socket failed, try running with sudo.\n");
             exit(EXIT_FAILURE);
         }
 
@@ -912,7 +908,7 @@ void tcpScanner(Options opts, int port)
         int response_socket = socket(AF_INET6, SOCK_RAW, IPPROTO_TCP);
         if (response_socket < 0)
         {
-            fprintf(stderr, RED "[Error] " RES "Creating an IPv6 socket failed, try running with sudo.\n");
+            printError("Creating an IPv6 socket failed, try running with sudo.\n");
             close(raw_socket);
             exit(EXIT_FAILURE);
         }
@@ -921,7 +917,7 @@ void tcpScanner(Options opts, int port)
         if (sendto(raw_socket, segment, sizeof(struct ip6_hdr) + sizeof(struct tcphdr), 0,
                    (struct sockaddr *)&destination_socket_address, sizeof(destination_socket_address)) < 0)
         {
-            fprintf(stderr, RED "[Error] " RES "Sending SYN packet failed.\n");
+            printError("Sending SYN packet failed.\n");
             close(raw_socket);
             exit(EXIT_FAILURE);
         }
@@ -939,7 +935,7 @@ void tcpScanner(Options opts, int port)
         // Select failed
         if (ret == -1)
         {
-            fprintf(stderr, RED "[Error] " RES "Select failed.\n");
+            printError("Select failed.\n");
             close(response_socket);
             exit(EXIT_FAILURE);
         }
@@ -958,7 +954,7 @@ void tcpScanner(Options opts, int port)
             if (recvfrom(response_socket, buffer, sizeof(buffer), 0, (struct sockaddr *)&socket_address,
                          (socklen_t *)&socket_address_size) < 0)
             {
-                fprintf(stderr, RED "[Error] " RES "Unable to receive packets.\n");
+                printError("Unable to receive packets.\n");
                 close(response_socket);
                 exit(EXIT_FAILURE);
             }
@@ -985,7 +981,7 @@ void tcpScanner(Options opts, int port)
     }
     else
     {
-        fprintf(stderr, RED "[Error] " RES "Unknown target type.\n");
+        printError("Unknown target type.\n");
         exit(EXIT_FAILURE);
     }
 }
@@ -995,7 +991,7 @@ bool is_program_interrupted = false;
 void exitProgram(int signal)
 {
     is_program_interrupted = true;
-    fprintf(stderr, "[Info] User interrupted the program with signal %d%s.\n", signal, signal == 2 ? " (SIGINT)" : "");
+    printInfo("User interrupted the program with signal %d%s.\n", signal, signal == 2 ? " (SIGINT)" : "");
 }
 
 void udpScanner(Options opts, int port)
@@ -1068,7 +1064,7 @@ void udpScanner(Options opts, int port)
         int raw_socket = socket(AF_INET, SOCK_RAW, IPPROTO_RAW);
         if (raw_socket < 0)
         {
-            fprintf(stderr, RED "[Error] " RES "Creating an IPv4 socket failed, try running with sudo.\n");
+            printError("Creating an IPv4 socket failed, try running with sudo.\n");
             exit(EXIT_FAILURE);
         }
 
@@ -1076,7 +1072,7 @@ void udpScanner(Options opts, int port)
         int response_socket = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
         if (response_socket < 0)
         {
-            fprintf(stderr, RED "[Error] " RES "Creating an IPv6 socket failed, try running with sudo.\n");
+            printError("Creating an IPv6 socket failed, try running with sudo.\n");
             close(raw_socket);
             exit(EXIT_FAILURE);
         }
@@ -1102,7 +1098,7 @@ void udpScanner(Options opts, int port)
         // Select failed
         if (ret == -1)
         {
-            fprintf(stderr, RED "[Error] " RES "Select failed.\n");
+            printError("Select failed.\n");
             close(response_socket);
             exit(EXIT_FAILURE);
         }
@@ -1119,7 +1115,7 @@ void udpScanner(Options opts, int port)
             if (recvfrom(response_socket, buffer, sizeof(buffer), 0, (struct sockaddr *)&socket_address,
                          &socket_address_length) < 0)
             {
-                fprintf(stderr, RED "[Error] " RES "Unable to receive packets.\n");
+                printError("Unable to receive packets.\n");
                 close(response_socket);
                 exit(EXIT_FAILURE);
             }
@@ -1205,7 +1201,7 @@ void udpScanner(Options opts, int port)
         int raw_socket = socket(AF_INET6, SOCK_RAW, IPPROTO_RAW);
         if (raw_socket < 0)
         {
-            fprintf(stderr, RED "[Error] " RES "Creating an IPv6 socket failed, try running with sudo.\n");
+            printError("Creating an IPv6 socket failed, try running with sudo.\n");
             exit(EXIT_FAILURE);
         }
 
@@ -1213,7 +1209,7 @@ void udpScanner(Options opts, int port)
         int response_socket = socket(AF_INET6, SOCK_RAW, IPPROTO_ICMPV6);
         if (response_socket < 0)
         {
-            fprintf(stderr, RED "[Error] " RES "Creating an IPv6 socket failed, try running with sudo.\n");
+            printError("Creating an IPv6 socket failed, try running with sudo.\n");
             close(raw_socket);
             exit(EXIT_FAILURE);
         }
@@ -1221,7 +1217,7 @@ void udpScanner(Options opts, int port)
         if (sendto(raw_socket, datagram, sizeof(struct ip6_hdr) + sizeof(struct udphdr), 0,
                    (struct sockaddr *)&destination_socket_address, sizeof(destination_socket_address)) < 0)
         {
-            fprintf(stderr, RED "[Error] " RES "Sending UDP packet failed.\n");
+            printError("Sending UDP packet failed.\n");
             close(raw_socket);
             exit(EXIT_FAILURE);
         }
@@ -1239,7 +1235,7 @@ void udpScanner(Options opts, int port)
         // Select failed
         if (ret == -1)
         {
-            fprintf(stderr, RED "[Error] " RES "Select failed.\n");
+            printError("Select failed.\n");
             close(response_socket);
             exit(EXIT_FAILURE);
         }
@@ -1256,7 +1252,7 @@ void udpScanner(Options opts, int port)
             if (recvfrom(response_socket, buffer, sizeof(buffer), 0, (struct sockaddr *)&socket_address,
                          &socket_address_length) < 0)
             {
-                fprintf(stderr, RED "[Error] " RES "Unable to receive packets.\n");
+                printError("Unable to receive packets.\n");
                 close(response_socket);
                 exit(EXIT_FAILURE);
             }
@@ -1277,7 +1273,7 @@ void udpScanner(Options opts, int port)
     }
     else
     {
-        fprintf(stderr, RED "[Error] " RES "Unknown target type.\n");
+        printError("Unknown target type.\n");
         exit(EXIT_FAILURE);
     }
 }
@@ -1303,7 +1299,7 @@ void scanPortsForEachAddress(struct addrinfo *addresses, Options opts)
         }
         else
         {
-            fprintf(stderr, RED "[Error] " RES "Unknown target type.\n");
+            printError("Unknown target type.\n");
             freeaddrinfo(addresses);
             exit(EXIT_FAILURE);
         }
