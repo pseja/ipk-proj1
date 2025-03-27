@@ -1,3 +1,8 @@
+/**
+ * @file argparse.c
+ * @author Lukas Pseja (xpsejal00)
+ */
+
 #include "argparse.h"
 
 void freeOptions(Options opts)
@@ -263,7 +268,7 @@ int regmatch(const char *pattern, const char *input)
     if (result)
     {
         printError("Could not compile regex %s\n", pattern);
-        return 0;
+        return false;
     }
 
     result = regexec(&regex, input, 0, NULL, 0);
@@ -276,11 +281,11 @@ bool isValidPortNumber(int port_number)
     return port_number >= 1 && port_number <= 65535;
 }
 
-int isSingleNumber(const char *input, int *port)
+bool isSingleNumber(const char *input, int *port)
 {
     if (!regmatch("^[1-9][0-9]{0,4}$", input))
     {
-        return 0;
+        return false;
     }
 
     *port = atoi(input);
@@ -288,11 +293,11 @@ int isSingleNumber(const char *input, int *port)
     return isValidPortNumber(*port);
 }
 
-int isCommaSeparatedList(const char *input, int *ports, int *count)
+bool isCommaSeparatedList(const char *input, int *ports, int *count)
 {
     if (!regmatch("^([1-9][0-9]{0,4})(,[1-9][0-9]{0,4})*$", input))
     {
-        return 0;
+        return false;
     }
 
     char buffer[65636];
@@ -307,7 +312,7 @@ int isCommaSeparatedList(const char *input, int *ports, int *count)
         int port = atoi(token);
         if (!isValidPortNumber(port))
         {
-            return 0;
+            return false;
         }
         temp_ports[temp_count++] = port;
         token = strtok(NULL, ",");
@@ -316,14 +321,14 @@ int isCommaSeparatedList(const char *input, int *ports, int *count)
     memcpy(ports, temp_ports, temp_count * sizeof(int));
     *count = temp_count;
 
-    return 1;
+    return true;
 }
 
-int isValidRange(const char *input, int *start, int *end)
+bool isValidRange(const char *input, int *start, int *end)
 {
     if (!regmatch("^([1-9][0-9]{0,4})-([1-9][0-9]{0,4})$", input))
     {
-        return 0;
+        return false;
     }
 
     char buffer[256];

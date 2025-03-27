@@ -1,6 +1,10 @@
+/**
+ * @file scanner.c
+ * @author Lukas Pseja (xpsejal00)
+ */
+
 #include "scanner.h"
 
-// source: https://datatracker.ietf.org/doc/html/rfc1071#section-4.1
 unsigned short checkSum(unsigned short *segment, int packet_size)
 {
     register long sum;
@@ -32,7 +36,7 @@ void tcpScanner(Options opts, int port)
 {
     if (opts.target_type == TARGET_IPV4)
     {
-        char segment[PACKET_SIZE]; // sizeof(struct iphdr) + sizeof(struct tcphdr)
+        char segment[PACKET_SIZE];
         memset(segment, 0, sizeof(segment));
 
         // IPv4 header and TCP header
@@ -363,6 +367,7 @@ void udpScanner(Options opts, int port)
         char datagram[PACKET_SIZE];
         memset(datagram, 0, sizeof(datagram));
 
+        // IPv4 header and UDP header
         struct iphdr *ip_header = (struct iphdr *)datagram;
         struct udphdr *udp_header = (struct udphdr *)(datagram + sizeof(struct iphdr));
 
@@ -386,9 +391,6 @@ void udpScanner(Options opts, int port)
         ip_header->saddr = inet_addr(ip_addr);
         ip_header->daddr = server_ip.s_addr;
         ip_header->check = checkSum((unsigned short *)datagram, ip_header->tot_len);
-
-        // buffer with a message
-        // char buffer[] = "";
 
         // udp header based on RFC 768
         // source: https://datatracker.ietf.org/doc/html/rfc768

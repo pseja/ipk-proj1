@@ -1,3 +1,8 @@
+/**
+ * @file main.c
+ * @author Lukas Pseja (xpsejal00)
+ */
+
 #include "argparse.h"
 #include "error.h"
 #include "network_utils.h"
@@ -60,7 +65,6 @@ void scanPortsForEachAddress(Options opts)
         }
     }
 
-    freeOptions(opts);
     freeaddrinfo(addresses);
 }
 
@@ -71,6 +75,8 @@ int main(int argc, char **argv)
     signal(SIGINT, exitProgram);
 
     scanPortsForEachAddress(opts);
+
+    freeOptions(opts);
 
     return 0;
 }

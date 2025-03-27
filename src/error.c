@@ -1,8 +1,6 @@
 /**
  * @file error.c
  * @author Lukas Pseja (xpsejal00)
- * @brief Error handling utilities implementation. This file is inspired by my previous year assignment in IJC
- * (https://github.com/pseja/ijc-proj1/blob/main/error.c) with some improvements.
  */
 
 #include "error.h"
