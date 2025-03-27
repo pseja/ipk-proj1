@@ -2,7 +2,7 @@
 # author Lukas Pseja (xpsejal00)
 
 CC=gcc
-CFLAGS=-std=c11 -Wall -Wextra -Werror
+CFLAGS=-std=c17 -Wall -Wextra -Werror
 DFLAGS=-D_GNU_SOURCE
 LDFLAGS=-lpcap
 
@@ -11,7 +11,9 @@ BUILD_DIR=./build
 
 TARGET=ipk-l4-scan
 
-.PHONY: all run debug test clean
+.PHONY: all run test clean
+
+all: $(TARGET)
 
 $(TARGET): $(BUILD_DIR)/main.o $(BUILD_DIR)/argparse.o $(BUILD_DIR)/network_utils.o $(BUILD_DIR)/scanner.o $(BUILD_DIR)/error.o
 	$(CC) $(CFLAGS) -o $@ $^ $(DFLAGS) $(LDFLAGS)

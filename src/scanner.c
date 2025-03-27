@@ -4,6 +4,7 @@
  */
 
 #include "scanner.h"
+#include "argparse.h"
 
 unsigned short checkSum(unsigned short *segment, int packet_size)
 {
@@ -116,6 +117,7 @@ void tcpScanner(Options opts, int port)
         if (response_socket < 0)
         {
             printError("Creating an IPv4 socket failed, try running with sudo.\n");
+            freeOptions(opts);
             exit(EXIT_FAILURE);
         }
 
@@ -125,6 +127,7 @@ void tcpScanner(Options opts, int port)
         {
             printError("Creating an IPv4 socket failed, try running with sudo.\n");
             close(response_socket);
+            freeOptions(opts);
             exit(EXIT_FAILURE);
         }
 
@@ -134,6 +137,7 @@ void tcpScanner(Options opts, int port)
         {
             printError("Sending SYN packet failed.\n");
             close(raw_socket);
+            freeOptions(opts);
             exit(EXIT_FAILURE);
         }
 
@@ -152,6 +156,7 @@ void tcpScanner(Options opts, int port)
         {
             printError("Select failed.\n");
             close(response_socket);
+            freeOptions(opts);
             exit(EXIT_FAILURE);
         }
         // Select timed out (no data was received in time)
@@ -170,6 +175,7 @@ void tcpScanner(Options opts, int port)
             {
                 printError("Unable to receive packets.\n");
                 close(response_socket);
+                freeOptions(opts);
                 exit(EXIT_FAILURE);
             }
 
@@ -275,6 +281,7 @@ void tcpScanner(Options opts, int port)
         if (response_socket < 0)
         {
             printError("Creating an IPv6 socket failed, try running with sudo.\n");
+            freeOptions(opts);
             exit(EXIT_FAILURE);
         }
 
@@ -284,6 +291,7 @@ void tcpScanner(Options opts, int port)
         {
             printError("Creating an IPv6 socket failed, try running with sudo.\n");
             close(response_socket);
+            freeOptions(opts);
             exit(EXIT_FAILURE);
         }
 
@@ -293,6 +301,7 @@ void tcpScanner(Options opts, int port)
         {
             printError("Sending SYN packet failed.\n");
             close(raw_socket);
+            freeOptions(opts);
             exit(EXIT_FAILURE);
         }
 
@@ -311,6 +320,7 @@ void tcpScanner(Options opts, int port)
         {
             printError("Select failed.\n");
             close(response_socket);
+            freeOptions(opts);
             exit(EXIT_FAILURE);
         }
         // Select timed out (no data was received in time)
@@ -330,6 +340,7 @@ void tcpScanner(Options opts, int port)
             {
                 printError("Unable to receive packets.\n");
                 close(response_socket);
+                freeOptions(opts);
                 exit(EXIT_FAILURE);
             }
 
@@ -356,6 +367,7 @@ void tcpScanner(Options opts, int port)
     else
     {
         printError("Unknown target type.\n");
+        freeOptions(opts);
         exit(EXIT_FAILURE);
     }
 }
@@ -429,6 +441,7 @@ void udpScanner(Options opts, int port)
         if (response_socket < 0)
         {
             printError("Creating an IPv6 socket failed, try running with sudo.\n");
+            freeOptions(opts);
             exit(EXIT_FAILURE);
         }
 
@@ -438,6 +451,7 @@ void udpScanner(Options opts, int port)
         {
             printError("Creating an IPv4 socket failed, try running with sudo.\n");
             close(response_socket);
+            freeOptions(opts);
             exit(EXIT_FAILURE);
         }
 
@@ -446,6 +460,7 @@ void udpScanner(Options opts, int port)
         {
             perror("[Error] Sending UDP packet failed");
             close(raw_socket);
+            freeOptions(opts);
             exit(EXIT_FAILURE);
         }
 
@@ -464,6 +479,7 @@ void udpScanner(Options opts, int port)
         {
             printError("Select failed.\n");
             close(response_socket);
+            freeOptions(opts);
             exit(EXIT_FAILURE);
         }
         else if (ret == 0)
@@ -481,6 +497,7 @@ void udpScanner(Options opts, int port)
             {
                 printError("Unable to receive packets.\n");
                 close(response_socket);
+                freeOptions(opts);
                 exit(EXIT_FAILURE);
             }
 
@@ -566,6 +583,7 @@ void udpScanner(Options opts, int port)
         if (response_socket < 0)
         {
             printError("Creating an IPv6 socket failed, try running with sudo.\n");
+            freeOptions(opts);
             exit(EXIT_FAILURE);
         }
 
@@ -575,6 +593,7 @@ void udpScanner(Options opts, int port)
         {
             printError("Creating an IPv6 socket failed, try running with sudo.\n");
             close(response_socket);
+            freeOptions(opts);
             exit(EXIT_FAILURE);
         }
 
@@ -583,6 +602,7 @@ void udpScanner(Options opts, int port)
         {
             printError("Sending UDP packet failed.\n");
             close(raw_socket);
+            freeOptions(opts);
             exit(EXIT_FAILURE);
         }
 
@@ -601,6 +621,7 @@ void udpScanner(Options opts, int port)
         {
             printError("Select failed.\n");
             close(response_socket);
+            freeOptions(opts);
             exit(EXIT_FAILURE);
         }
         else if (ret == 0)
@@ -618,6 +639,7 @@ void udpScanner(Options opts, int port)
             {
                 printError("Unable to receive packets.\n");
                 close(response_socket);
+                freeOptions(opts);
                 exit(EXIT_FAILURE);
             }
 
@@ -638,6 +660,7 @@ void udpScanner(Options opts, int port)
     else
     {
         printError("Unknown target type.\n");
+        freeOptions(opts);
         exit(EXIT_FAILURE);
     }
 }

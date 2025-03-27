@@ -78,6 +78,7 @@ Options parseOptions(int argc, char **argv)
             else
             {
                 printNetworkInterfaces();
+                freeOptions(opts);
                 exit(EXIT_SUCCESS);
             }
 
