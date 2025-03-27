@@ -35,7 +35,7 @@ run_test() {
 
     $IPK_L4_SCAN $test_args >/dev/null 2>&1
     your_exit_code=$?
-    
+
     if [[ "$your_exit_code" == "$expected_exit_code" ]]; then
         echo -e "${GREEN}[PASS]${NORMAL} ${test_desc}"
         correct=$((correct + 1))
@@ -48,6 +48,18 @@ run_test() {
 }
 
 # tests
+## help tests
+run_test "Help flag - short option" "-h" 0
+run_test "Help flag - long option" "--help" 0
+run_test "Help flag with valid interface argument - short option" "-h -i ${VALID_INTERFACE}" 1
+run_test "Help flag with valid interface argument - long option" "--help --interface ${VALID_INTERFACE}" 1
+run_test "Help flag with valid target argument - short option" "-h 127.0.0.1" 1
+run_test "Help flag with valid target argument - long option" "--help 127.0.0.1" 1
+run_test "Help flag with valid port argument - short option" "-h -t 80,443" 1
+run_test "Help flag with valid port argument - long option" "--help --pt 80,443" 1
+run_test "Help flag with multiple valid arguments - short option" "-h -i ${VALID_INTERFACE} -t 80,443 127.0.0.1" 1
+run_test "Help flag with multiple valid arguments - long option" "--help --interface ${VALID_INTERFACE} --pt 80,443 127.0.0.1" 1
+
 ## assignment tests
 run_test "Execution Examples 1" "--interface ${VALID_INTERFACE} -u 53,67 2001:67c:1220:809::93e5:917" 0
 run_test "Execution Examples 2" "-i ${VALID_INTERFACE} -w 1000 -t 80,443,8080 www.vutbr.cz" 0
