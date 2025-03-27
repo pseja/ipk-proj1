@@ -11,7 +11,7 @@ BUILD_DIR=./build
 
 TARGET=ipk-l4-scan
 
-.PHONY: all run test clean
+.PHONY: all run test clean zip
 
 all: $(TARGET)
 
@@ -46,3 +46,6 @@ test: $(TARGET)
 
 clean:
 	rm -rf $(TARGET) $(BUILD_DIR)
+
+zip:
+	zip -r xpsejal00.zip imgs src test CHANGELOG.md LICENCE Makefile README.md
