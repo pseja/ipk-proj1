@@ -48,4 +48,4 @@ clean:
 	rm -rf $(TARGET) $(BUILD_DIR)
 
 zip:
-	zip -r xpsejal00.zip imgs src test CHANGELOG.md LICENCE Makefile README.md
+	zip -r xpsejal00.zip imgs src test CHANGELOG.md LICENSE Makefile README.md
