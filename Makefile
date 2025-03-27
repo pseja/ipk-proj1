@@ -1,3 +1,6 @@
+# file Makefile
+# author Lukas Pseja (xpsejal00)
+
 CC=gcc
 CFLAGS=-std=c11 -Wall -Wextra -Werror
 DFLAGS=-D_GNU_SOURCE
