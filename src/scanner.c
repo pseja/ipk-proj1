@@ -162,7 +162,7 @@ void tcpScanner(Options opts, int port)
         // Select timed out (no data was received in time)
         else if (ret == 0)
         {
-            printf("%s %d filtered\n", opts.target, port);
+            printf("%s %d tcp filtered\n", opts.target, port);
         }
         else
         {
