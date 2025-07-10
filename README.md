@@ -7,6 +7,9 @@ Date: 27.3.2025
 
 Variant: Omega
 
+## Final evaluation
+(7.33/10) - I couldn't figure out how to do localhost port scanning on TCP, nor UDP.
+
 ## Author's note<a id="authorsnote"></a>
 This documentation will be structured as a tutorial with the most useful information I could find for someone who doesn't know anything about TCP/UDP scanning so that when I or someone else comes and reads this documentation will be able to understand how it was done. Time spent on this project was 60 hours flat not counting the reading of the bibliography that was given to us and I learned how to use [tmux](https://en.wikipedia.org/wiki/Tmux) which was a great help during development as well as other networking tools like [wireshark](https://en.wikipedia.org/wiki/Wireshark), [nmap](https://en.wikipedia.org/wiki/Nmap), [netcat](https://en.wikipedia.org/wiki/Netcat) and others.
 
